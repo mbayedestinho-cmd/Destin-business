@@ -40,7 +40,7 @@ st.markdown("""
     /* Séparateurs fins */
     hr { border-top: 1px solid #E2E8F0; }
     </style>
-""", unsafe_allow_headers=True)
+""", unsafe_allow_html=True)
 # ==============================================================================
 # 2. RÉCUPÉRATION SÉCURISÉE DES SECRETS STREAMLIT
 # ==============================================================================
@@ -48,7 +48,6 @@ try:
     ID_SHEET = st.secrets["ID_DU_SHEET"]
     URL_PASSERELLE = st.secrets["URL_PASSERELLE_WEB"]
     CODE_ADMIN = st.secrets["CODE_SECRET_ADMIN"]
-    # Optionnel : Ajoutez "NUMERO_WHATSAPP" dans vos secrets (ex: 23566000000)
     NUMERO_WHATSAPP = st.secrets.get("NUMERO_WHATSAPP", "23566000000")
 except Exception:
     st.error("⚠️ Erreur : Les secrets Streamlit (ID_DU_SHEET, URL_PASSERELLE_WEB, etc.) ne sont pas configurés sur votre tableau de bord Streamlit Cloud.")
@@ -56,13 +55,11 @@ except Exception:
 # ==============================================================================
 # 3. SYSTÈME DE CHARGEMENT DE LA BASE DE DONNÉES (GOOGLE SHEETS)
 # ==============================================================================
-@st.cache_data(ttl=60)  # Rafraîchit automatiquement le catalogue toutes les 60 secondes
+@st.cache_data(ttl=60) 
 def charger_catalogue():
-    # Lien d'exportation dynamique au format CSV propre
     url_csv = f"https://docs.google.com/spreadsheets/d/{ID_SHEET}/gviz/tq?tqx=out:csv"
     try:
         df = pd.read_csv(url_csv)
-        # Nettoyage automatique des noms de colonnes (minuscules et sans espaces)
         df.columns = [col.lower().strip() for col in df.columns]
         return df.to_dict(orient="records")
     except Exception as e:
@@ -84,16 +81,14 @@ with onglet_visiteur:
     if not catalogue:
         st.info("🛍️ Le catalogue est vide ou en cours de chargement. Revenez dans un instant !")
     else:
-        # Barre de recherche et filtres de prix adaptés pour écran tactile
         col_recherche, col_budget = st.columns([2, 1])
         with col_recherche:
             recherche = st.text_input("🔍 Rechercher un modèle...", placeholder="Ex: Robe, Costume, Veste...")
         with col_budget:
             prix_max = st.number_input("💰 Budget max (FCFA)", value=150000, step=5000)
            
-        st.write("")  # Petit espace espacement
+        st.write("") 
        
-        # Filtrage en temps réel basé sur la recherche de l'utilisateur
         produits_filtres = [
             p for p in catalogue
             if (str(recherche).lower() in str(p.get("nom", "")).lower()) and (float(p.get("prix", 0)) <= prix_max)
@@ -102,37 +97,32 @@ with onglet_visiteur:
         if not produits_filtres:
             st.warning("Aucun vêtement ne correspond à vos critères actuels.")
         else:
-            # Affichage vertical optimisé pour le défilement (scroll) sur téléphone
             for produit in produits_filtres:
                 nom = produit.get("nom", "Article sans nom")
                 prix = produit.get("prix", 0)
                 url_image = produit.get("image", "")
                
-                # Mise en forme du bloc produit
                 st.subheader(f"{nom}")
                 st.markdown(f"**💰 Prix :** {int(prix):,} FCFA".replace(",", " "))
                
-                # Gestion sécurisée de l'affichage de la photo
                 if pd.isna(url_image) or not str(url_image).startswith("http"):
                     st.info("📷 Image en cours de chargement par l'administrateur")
                 else:
                     st.image(url_image, use_container_width=True)
                
-                # Génération automatique du message WhatsApp crypté proprement
+                # Correction ici : Utilisation de la bonne varia
                 message_client = f"Bonjour Collection Luxe N'Djamena, je souhaite commander l'article suivant :\n\n- *Produit :* {nom}\n- *Prix :* {int(prix):,} FCFA".replace(",", " ")
-                texte_encode = requests.utils.quote(message_whatsapp)
+                texte_encode = requests.utils.quote(message_client)
                 lien_whatsapp_final = f"https://wa.me/{NUMERO_WHATSAPP}?text={texte_encode}"
                
-                # Bouton d'action principal
                 st.link_button("🛍️ Commander cet article", lien_whatsapp_final)
                 st.write("---")
 # ------------------------------------------------------------------------------
 # INTERFACE COMMERÇANT : LE PANNEAU DE GESTION
 # ------------------------------------------------------------------------------
 with onglet_admin:
-    st.title("⚙️ Espace Administrateur")
+    st.title("⚙️ Espace Administrator")
    
-    # Formulaire d'authentification sécurisé dissimulant les caractères
     mot_de_passe = st.text_input("Entrez le code secret de sécurité :", type="password")
    
     if mot_de_passe == CODE_ADMIN:
@@ -140,7 +130,6 @@ with onglet_admin:
         st.write("---")
         st.write("### ➕ Ajouter une nouveauté au catalogue")
        
-        # Formulaire d'insertion propre avec réinitialisation automatique au clic
         with st.form("formulaire_ajout", clear_on_submit=True):
             nouveau_nom = st.text_input("Nom du vêtement / de la pièce :", placeholder="Ex: Costume Slim Fit 3 Pièces")
             nouveau_prix = st.number_input("Prix de vente en boutique (FCFA) :", min_value=0, step=1000, value=25000)
@@ -152,20 +141,17 @@ with onglet_admin:
                 if not nouveau_nom or not nouvelle_image_url:
                     st.error("❌ Erreur : Le nom de l'article et l'URL de sa photo sont obligatoires.")
                 else:
-                    # Préparation des données au format JSON structuré pour Google Sheets
                     donnees_produit = {
                         "nom": nouveau_nom,
                         "prix": int(nouveau_prix),
                         "image": nouvelle_image_url.strip()
                     }
                    
-                    # Envoi asynchrone vers Google Apps Script
                     with st.spinner("Mise à jour du catalogue en cours..."):
                         try:
                             reponse = requests.post(URL_PASSERELLE, json=donnees_produit)
                             if reponse.status_code == 200:
                                 st.success("🎉 Succès ! L'article est enregistré et visible sur la boutique.")
-                                # Nettoyage instantané du cache pour forcer l'affichage du nouvel article
                                 st.cache_data.clear()
                             else:
                                 st.error(f"La passerelle Google a renvoyé un code d'erreur : {reponse.status_code}")
@@ -174,4 +160,3 @@ with onglet_admin:
                            
     elif mot_de_passe != "":
         st.error("❌ Clé de sécurité incorrecte. Accès au panneau refusé.")
-     
