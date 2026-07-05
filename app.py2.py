@@ -83,7 +83,7 @@ with onglet_admin:
         st.subheader("✍️ Paramétrage Personnel du Message Marketing")
         st.session_state.texte_marketing = st.text_area("Modifie et écris ton propre texte de saison ici :", st.session_state.texte_marketing, height=120)
     # --- SECTION B : FORMULAIRE D'AJOUT AVEC IMAGE ---
-     st.markdown("---")
+      st.markdown("---")
     st.subheader("✨ Ajouter une nouvelle pièce avec Image")
    
     with st.form("formulaire_ajout", clear_on_submit=True):
