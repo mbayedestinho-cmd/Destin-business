@@ -1,162 +1,128 @@
 import streamlit as st
-import pandas as pd
 import requests
-# ==============================================================================
-# 1. CONFIGURATION DE LA PAGE & STYLE VISUEL "LUXE"
-# ==============================================================================
+import pandas as pd
+# 1. Configuration de la page
 st.set_page_config(
     page_title="Collection Luxe N'Djamena",
-    page_icon="👑",
-    layout="centered",
-    initial_sidebar_state="collapsed"
+    page_icon="✨",
+    layout="wide", # Utilise tout l'écran pour un effet moderne
+    initial_sidebar_state="expanded"
 )
-# Injection de styles CSS pour forcer un rendu premium et mobile-friendly
+# 2. Design VIP : Injection de CSS personnalisé pour le style Mode/Luxe
 st.markdown("""
     <style>
-    /* Fond de page blanc et épuré */
-    .main { background-color: #FFFFFF; }
+    /* Changer la police globale et le fond */
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Poppins:wght@300;400;600&display=swap');
    
-    /* Boutons personnalisés couleur Or / Or Doré */
-    div.stButton > button:first-child, .stDownloadButton>button {
-        background-color: #D4AF37 !important;
-        color: #FFFFFF !important;
-        border-radius: 8px !important;
+    html, body, [data-testid="stAppViewContainer"] {
+        background-color: #fcfbf9; /* Fond blanc cassé très élégant */
+        font-family: 'Poppins', sans-serif;
+    }
+   
+    /* Style des titres en police classique/luxe */
+    h1, h2, h3 {
+        font-family: 'Playfair Display', serif !important;
+        color: #1a1a1a !important;
+        text-align: center;
+    }
+   
+    /* Design des cartes de vêtements */
+    .product-card {
+        background-color: #ffffff;
+        border: 1px solid #eef0f2;
+        border-radius: 12px;
+        padding: 15px;
+        text-align: center;
+        box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.03);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        margin-bottom: 25px;
+    }
+    .product-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0px 10px 25px rgba(0, 0, 0, 0.08);
+    }
+   
+    /* Style des images pour qu'elles soient toutes uniformes */
+    .product-image {
+        border-radius: 8px;
+        object-fit: cover;
+        width: 100%;
+        height: 280px;
+        margin-bottom: 15px;
+    }
+   
+    /* Prix mis en valeur */
+    .product-price {
+        color: #b58328; /* Couleur Or/Bronze pour le côté Premium */
+        font-weight: 600;
+        font-size: 1.2rem;
+        margin: 10px 0;
+    }
+   
+    /* Personnalisation des boutons Streamlit */
+    div.stButton > button {
+        background-color: #1a1a1a !important; /* Bouton noir chic */
+        color: white !important;
+        border-radius: 6px !important;
         border: none !important;
-        font-weight: bold !important;
-        width: 100% !important;
-        padding: 12px !important;
-        transition: all 0.3s ease;
+        width: 100%;
+        padding: 10px 0 !important;
+        font-weight: 400 !important;
+        transition: background 0.3s !important;
     }
-    div.stButton > button:first-child:hover {
-        background-color: #B7791F !important;
-        box-shadow: 0px 4px 10px rgba(0,0,0,0.15);
+    div.stButton > button:hover {
+        background-color: #b58328 !important; /* Devient Or au survol */
+        color: white !important;
     }
-   
-    /* Liens hypertexte transformés en boutons élégants */
-    a.stLinkButton {
-        width: 100% !important;
-    }
-   
-    /* Séparateurs fins */
-    hr { border-top: 1px solid #E2E8F0; }
     </style>
 """, unsafe_allow_html=True)
-# ==============================================================================
-# 2. RÉCUPÉRATION SÉCURISÉE DES SECRETS STREAMLIT
-# ==============================================================================
-try:
-    ID_SHEET = st.secrets["ID_DU_SHEET"]
-    URL_PASSERELLE = st.secrets["URL_PASSERELLE_WEB"]
-    CODE_ADMIN = st.secrets["CODE_SECRET_ADMIN"]
-    NUMERO_WHATSAPP = st.secrets.get("NUMERO_WHATSAPP", "23566000000")
-except Exception:
-    st.error("⚠️ Erreur : Les secrets Streamlit (ID_DU_SHEET, URL_PASSERELLE_WEB, etc.) ne sont pas configurés sur votre tableau de bord Streamlit Cloud.")
-    st.stop()
-# ==============================================================================
-# 3. SYSTÈME DE CHARGEMENT DE LA BASE DE DONNÉES (GOOGLE SHEETS)
-# ==============================================================================
-@st.cache_data(ttl=60) 
-def charger_catalogue():
-    url_csv = f"https://docs.google.com/spreadsheets/d/{ID_SHEET}/gviz/tq?tqx=out:csv"
-    try:
-        df = pd.read_csv(url_csv)
-        df.columns = [col.lower().strip() for col in df.columns]
-        return df.to_dict(orient="records")
-    except Exception as e:
-        st.error(f"Impossible de synchroniser le catalogue : {e}")
-        return []
-catalogue = charger_catalogue()
-# ==============================================================================
-# 4. STRUCTURE DE L'INTERFACE (ONGLETS FLUIDES)
-# ==============================================================================
-onglet_visiteur, onglet_admin = st.tabs(["🛒 Boutique Visiteur", "⚙️ Panneau de Contrôle Admin"])
-# ------------------------------------------------------------------------------
-# INTERFACE CLIENT : LA BOUTIQUE
-# ------------------------------------------------------------------------------
-with onglet_visiteur:
-    st.title("👑 Collection Luxe N'Djamena")
-    st.write("Parcourez nos pièces exclusives et commandez directement sur WhatsApp.")
-    st.write("---")
-   
-    if not catalogue:
-        st.info("🛍️ Le catalogue est vide ou en cours de chargement. Revenez dans un instant !")
-    else:
-        col_recherche, col_budget = st.columns([2, 1])
-        with col_recherche:
-            recherche = st.text_input("🔍 Rechercher un modèle...", placeholder="Ex: Robe, Costume, Veste...")
-        with col_budget:
-            prix_max = st.number_input("💰 Budget max (FCFA)", value=150000, step=5000)
-           
-        st.write("") 
+# --- EN-TÊTE DE LA BOUTIQUE ---
+st.markdown("<h1>✨ COLLECTION LUXE N'DJAMENA ✨</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #666; font-style: italic; font-size: 1.1rem;'>L'élégance et la haute couture à votre portée</p>", unsafe_allow_html=True)
+st.write("---")
+# --- SIMULATION DE VOS DONNÉES GOOGLE SHEETS ---
+# À remplacer par votre fonction : df = charger_donnees_depuis_sheets()
+data = {
+    "nom": ["L'Exception VIP", "Tissu Brodé Premium", "Boubou Royal"],
+    "prix": [45000, 35000, 60000],
+    "image": [
+        "https://images.unsplash.com/photo-1593032465175-481ac7f401a0?w=600",
+        "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=600",
+        "https://images.unsplash.com/photo-1539109136881-3be0616acf4b?w=600"
+    ]
+}
+df = pd.DataFrame(data)
+# --- AFFICHAGE EN GRILLE MODERNE (3 colonnes) ---
+st.subheader("🛍️ Notre Catalogue Exclusif")
+# Création des colonnes dynamiques
+cols = st.columns(3)
+for index, row in df.iterrows():
+    # Sélection de la colonne (0, 1 ou 2)
+    with cols[index % 3]:
+        # Encapsulation dans une carte HTML stylisée par notre CSS
+        st.markdown(f"""
+            <div class="product-card">
+                <img class="product-image" src="{row['image']}">
+                <h3 style='font-size: 1.3rem; margin-bottom: 5px;'>{row['nom']}</h3>
+                <div class="product-price">{int(row['prix']):,} FCFA</div>
+            </div>
+        """, unsafe_allow_html=True)
        
-        produits_filtres = [
-            p for p in catalogue
-            if (str(recherche).lower() in str(p.get("nom", "")).lower()) and (float(p.get("prix", 0)) <= prix_max)
-        ]
-       
-        if not produits_filtres:
-            st.warning("Aucun vêtement ne correspond à vos critères actuels.")
-        else:
-            for produit in produits_filtres:
-                nom = produit.get("nom", "Article sans nom")
-                prix = produit.get("prix", 0)
-                url_image = produit.get("image", "")
-               
-                st.subheader(f"{nom}")
-                st.markdown(f"**💰 Prix :** {int(prix):,} FCFA".replace(",", " "))
-               
-                if pd.isna(url_image) or not str(url_image).startswith("http"):
-                    st.info("📷 Image en cours de chargement par l'administrateur")
-                else:
-                    st.image(url_image, use_container_width=True)
-               
-                # Correction ici : Utilisation de la bonne varia
-                message_client = f"Bonjour Collection Luxe N'Djamena, je souhaite commander l'article suivant :\n\n- *Produit :* {nom}\n- *Prix :* {int(prix):,} FCFA".replace(",", " ")
-                texte_encode = requests.utils.quote(message_client)
-                lien_whatsapp_final = f"https://wa.me/{NUMERO_WHATSAPP}?text={texte_encode}"
-               
-                st.link_button("🛍️ Commander cet article", lien_whatsapp_final)
-                st.write("---")
-# ------------------------------------------------------------------------------
-# INTERFACE COMMERÇANT : LE PANNEAU DE GESTION
-# ------------------------------------------------------------------------------
-with onglet_admin:
-    st.title("⚙️ Espace Administrator")
+        # Bouton d'action sous la carte
+        if st.button(f"Commander {row['nom']}", key=f"btn_{index}"):
+            st.success(f"🛒 {row['nom']} a été ajouté à votre panier !")
+# --- PANNEAU ADMIN (Dissimulé proprement dans la barre latérale) ---
+with st.sidebar:
+    st.markdown("<h2 style='text-align: left;'>⚙️ Zone Gestion Admin</h2>", unsafe_allow_html=True)
    
-    mot_de_passe = st.text_input("Entrez le code secret de sécurité :", type="password")
-   
-    if mot_de_passe == CODE_ADMIN:
-        st.success("🔓 Accès gestionnaire autorisé.")
-        st.write("---")
-        st.write("### ➕ Ajouter une nouveauté au catalogue")
+    with st.expander("➕ Ajouter une pièce"):
+        st.text_input("Nom de l'article")
+        st.number_input("Prix (FCFA)", min_value=0)
+        st.text_input("Lien de la photo")
+        st.button("Publier l'article")
        
-        with st.form("formulaire_ajout", clear_on_submit=True):
-            nouveau_nom = st.text_input("Nom du vêtement / de la pièce :", placeholder="Ex: Costume Slim Fit 3 Pièces")
-            nouveau_prix = st.number_input("Prix de vente en boutique (FCFA) :", min_value=0, step=1000, value=25000)
-            nouvelle_image_url = st.text_input("Lien direct (URL) de la photo :", placeholder="https://i.postimg.cc/.../photo.jpg")
-           
-            bouton_validation = st.form_submit_button("🚀 Mettre en vente immédiatement")
-           
-            if bouton_validation:
-                if not nouveau_nom or not nouvelle_image_url:
-                    st.error("❌ Erreur : Le nom de l'article et l'URL de sa photo sont obligatoires.")
-                else:
-                    donnees_produit = {
-                        "nom": nouveau_nom,
-                        "prix": int(nouveau_prix),
-                        "image": nouvelle_image_url.strip()
-                    }
-                   
-                    with st.spinner("Mise à jour du catalogue en cours..."):
-                        try:
-                            reponse = requests.post(URL_PASSERELLE, json=donnees_produit)
-                            if reponse.status_code == 200:
-                                st.success("🎉 Succès ! L'article est enregistré et visible sur la boutique.")
-                                st.cache_data.clear()
-                            else:
-                                st.error(f"La passerelle Google a renvoyé un code d'erreur : {reponse.status_code}")
-                        except Exception as erreur:
-                            st.error(f"Erreur de communication réseau : {erreur}")
-                           
-    elif mot_de_passe != "":
-        st.error("❌ Clé de sécurité incorrecte. Accès au panneau refusé.")
+    with st.expander("🗑️ Supprimer une pièce"):
+    st.selectbox("Choisir l'article à retirer", df['nom'].tolist() if not df.empty else ["Aucun"])
+    st.button("Confirmer la suppression")
+        st.selectbox("Choisir l'article à retirer", df['nom'].tolist() if not df.empty else ["Aucun"])
+        st.button("Confirmer la suppression")
