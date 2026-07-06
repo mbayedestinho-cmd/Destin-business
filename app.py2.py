@@ -159,7 +159,7 @@ if not df.empty:
             txt_whatsapp = f"Bonjour Collection Luxe N'Djamena, je souhaite commander cette pièce :\n\n- *Article :* {row['nom']}\n- *Prix :* {text_prix}"
             url_whatsapp = f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(txt_whatsapp)}"
                   # Affichage de la carte visuelle (sans le lien direct pour pouvoir compter les clics)
-           st.markdown(f"""
+             st.markdown(f"""
         <div class="product-card">
             <img class="product-image" src="{row['image']}">
             <h3 style='font-family: "Playfair Display", serif; font-size: 1.4rem; margin: 0 0 5px 0;'>{row['nom']}</h3>
@@ -179,6 +179,9 @@ if not df.empty:
             requests.post(URL_PASSERELLE, json=payload_clic, timeout=4)
         except Exception:
             pass  # Ignore l'erreur si la connexion échoue pour ne pas bloquer le client
+        # Redirection automatique vers WhatsApp
+        js = f"window.open('{url_whatsapp}')"
+        st.components.v1.html(f"<script>{js}</script>", height=0)
         # Redirection automatique vers WhatsApp
         js = f"window.open('{url_whatsapp}')"
         st.components.v1.html(f"<script>{js}</script>", height=0)
