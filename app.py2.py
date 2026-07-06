@@ -80,18 +80,23 @@ st.markdown("""
 st.markdown("<h1>✨ COLLECTION LUXE N'DJAMENA ✨</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center; color: #666; font-style: italic; font-size: 1.1rem;'>L'élégance et la haute couture à votre portée</p>", unsafe_allow_html=True)
 st.write("---")
-# --- SIMULATION DE VOS DONNÉES GOOGLE SHEETS ---
-# À remplacer par votre fonction : df = charger_donnees_depuis_sheets()
-data = {
-    "nom": ["L'Exception VIP", "Tissu Brodé Premium", "Boubou Royal"],
-    "prix": [45000, 35000, 60000],
-    "image": [
-        "https://images.unsplash.com/photo-1593032465175-481ac7f401a0?w=600",
-        "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=600",
-        "https://images.unsplash.com/photo-1539109136881-3be0616acf4b?w=600"
-    ]
-}
-df = pd.DataFrame(data)
+# --- CONNEXION RÉELLE À VOTRE GOOGLE SHEETS ---
+try:
+    # 1. Récupération de l'ID depuis vos secrets Streamlit Cloud
+    id_sheet = st.secrets["ID_DU_SHEET"]
+   
+    # 2. Construction du lien d'export CSV automatique
+    url_csv = f"https://docs.google.com/spreadsheets/d/{id_sheet}/gviz/tq?tqx=out:csv"
+   
+    # 3. Lecture et traitement propre du tableau avec Pandas
+    df = pd.read_csv(url_csv)
+   
+    # Nettoyage de sécurité : on force les noms de colonnes en minuscules
+    df.columns = [col.lower().strip() for col in df.columns]
+except Exception as e:
+    st.error(f"⚠️ Impossible de charger le catalogue depuis Google Sheets : {e}")
+    # En cas de problème, crée un tableau vide pour éviter le crash
+    df = pd.DataFrame(columns=["nom", "prix", "image"])
 # --- AFFICHAGE EN GRILLE MODERNE (3 colonnes) ---
 st.subheader("🛍️ Notre Catalogue Exclusif")
 # Création des colonnes dynamiques
