@@ -148,7 +148,7 @@ if not df.empty:
     for index, row in df.iterrows():
         with cols[index % 3]:
 # Nettoyage et formatage du prix pour l'affichage et WhatsApp
-try:
+        try:
             prix_formate = int(row['prix'])
             text_prix = f"{prix_formate:,} FCFA"
 except Exception:
