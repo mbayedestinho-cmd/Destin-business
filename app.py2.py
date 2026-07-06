@@ -173,8 +173,8 @@ if not df.empty:
                         "prix": row['prix']
                     }
                     requests.post(URL_PASSERELLE, json=payload_clic, timeout=4)
-                except Exception:
-                    pass
+                except Exception as e:
+                    st.error(f"Erreur technique de suivi: {e}")
                 # Redirection automatique vers WhatsApp
                 js = f"window.open('{url_whatsapp}')"
                 st.components.v1.html(f"<script>{js}</script>", height=0)
