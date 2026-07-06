@@ -140,7 +140,9 @@ except Exception as e:
     st.error(f"⚠️ Erreur d'accès au catalogue : {e}")
     df = pd.DataFrame(columns=["nom", "prix", "image"])
 # --- LE CATALOGUE EXCLUSIF ---
-st.markdown('<h2 class="section-title">🛍️ Notre Catalogue Exclusif</h2>', unsafe_allow_html=True)
+# ==============================================================================
+# LE BLOC CATALOGUE COMPLET ET CORRIGÉ (À REMPLACER ENTIÈREMENT)
+# ==============================================================================
 if not df.empty:
     cols = st.columns(3)
     for index, row in df.iterrows():
@@ -152,18 +154,35 @@ if not df.empty:
             except:
                 text_prix = f"{row['prix']} FCFA"
                 prix_formate = row['prix']
+           
             # Construction du message de commande automatique
             txt_whatsapp = f"Bonjour Collection Luxe N'Djamena, je souhaite commander cette pièce :\n\n- *Article :* {row['nom']}\n- *Prix :* {text_prix}"
             url_whatsapp = f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(txt_whatsapp)}"
            
-            # Affichage de la carte
-            # COLLEZ CE BLOC À LA PLACE :
-st.markdown(f"""
-    <div class="product-card">
-        <img class="product-image" src="{row['image']}">
-        <h3 style='font-family: "Playfair Display", serif; font-size: 1.4rem; margin: 0 0 5px 0;'>{row['nom']}</h3>
-        <div class="product-price">{text_prix}</div>
-""", unsafe_allow_html=True)
+            # Affichage du visuel de la carte HTML
+            st.markdown(f"""
+                <div class="product-card">
+                    <img class="product-image" src="{row['image']}">
+                    <h3 style='font-family: "Playfair Display", serif; font-size: 1.4rem; margin: 0 0 5px 0;'>{row['nom']}</h3>
+                    <div class="product-price">{text_prix}</div>
+            """, unsafe_allow_html=True)
+            # Bouton Streamlit qui compte les clics de manière sécurisée
+            if st.button(f"💬 Commander sur WhatsApp", key=f"btn_{row['nom']}"):
+                if 'suivi_clics' not in st.session_state:
+                    st.session_state['suivi_clics'] = {}
+               
+                nom_article = row['nom']
+                st.session_state['suivi_clics'][nom_article] = st.session_state['suivi_clics'].get(nom_article, 0) + 1
+               
+                # Script pour ouvrir automatiquement WhatsApp dans un nouvel onglet
+                js = f"window.open('{url_whatsapp}')"
+                st.components.v1.html(f"<script>{js}</script>", height=0)
+               
+            # Fermeture propre de la carte HTML
+            st.markdown("</div>", unsafe_allow_html=True)
+else:
+    st.info("Le catalogue est en cours de mise à jour. Revenez dans un instant !")
+# ==============================================================================
 # L'intrus magique : le bouton Streamlit qui compte vos clics
 if st.button(f"💬 Commander sur WhatsApp", key=f"btn_{row['nom']}"):
     nom_article = row['nom']
