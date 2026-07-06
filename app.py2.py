@@ -170,14 +170,22 @@ if not df.empty:
             if st.button(f"💬 Commander sur WhatsApp", key=f"btn_{row['nom']}"):
                 if 'suivi_clics' not in st.session_state:
                     st.session_state['suivi_clics'] = {}
-               
                 nom_article = row['nom']
                 st.session_state['suivi_clics'][nom_article] = st.session_state['suivi_clics'].get(nom_article, 0) + 1
-               
+                # 🚀 ENVOI DU CLIC AU TABLEUR GOOGLE VIA LA PASSERELLE
+                try:
+                    payload_clic = {
+                        "action": "enregistrement_clic",
+                        "article": nom_article,
+                        "prix": row['prix']
+                    }
+                    # Envoi en arrière-plan rapide (timeout de 4 secondes pour ne pas bloquer l'utilisateur)
+                    requests.post(URL_PASSERELLE, json=payload_clic, timeout=4)
+                except Exception:
+                    pass  # Si la connexion échoue, on ignore l'erreur pour ne pas bloquer l'achat
                 # Script pour ouvrir automatiquement WhatsApp dans un nouvel onglet
                 js = f"window.open('{url_whatsapp}')"
                 st.components.v1.html(f"<script>{js}</script>", height=0)
-               
             # Fermeture propre de la carte HTML
             st.markdown("</div>", unsafe_allow_html=True)
 else:
