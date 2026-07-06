@@ -122,7 +122,5 @@ with st.sidebar:
         st.button("Publier l'article")
        
     with st.expander("🗑️ Supprimer une pièce"):
-    st.selectbox("Choisir l'article à retirer", df['nom'].tolist() if not df.empty else ["Aucun"])
-    st.button("Confirmer la suppression")
         st.selectbox("Choisir l'article à retirer", df['nom'].tolist() if not df.empty else ["Aucun"])
         st.button("Confirmer la suppression")
