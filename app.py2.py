@@ -158,14 +158,30 @@ if not df.empty:
             # Construction du message de commande automatique
             txt_whatsapp = f"Bonjour Collection Luxe N'Djamena, je souhaite commander cette pièce :\n\n- *Article :* {row['nom']}\n- *Prix :* {text_prix}"
             url_whatsapp = f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(txt_whatsapp)}"
-           
-            # Affichage du visuel de la carte HTML
-            st.markdown(f"""
-                <div class="product-card">
-                    <img class="product-image" src="{row['image']}">
-                    <h3 style='font-family: "Playfair Display", serif; font-size: 1.4rem; margin: 0 0 5px 0;'>{row['nom']}</h3>
-                    <div class="product-price">{text_prix}</div>
-            """, unsafe_allow_html=True)
+                  # Affichage de la carte visuelle (sans le lien direct pour pouvoir compter les clics)
+        st.markdown(f"""
+            <div class="product-card">
+                <img class="product-image" src="{row['image']}">
+                <h3 style='font-family: "Playfair Display", serif; font-size: 1.4rem; margin: 0 0 5px 0;'>{row['nom']}</h3>
+                <div class="product-price">{text_price}</div>
+            </div>
+        """, unsafe_allow_html=True)
+        # Vrai bouton Streamlit connecté à votre tableur Google
+        if st.button(f"💬 Commander sur WhatsApp", key=f"btn_{row['nom']}"):
+            # 🚀 ENVOI DU CLIC À LA PASSERELLE GOOGLE SHEET
+            try:
+                payload_clic = {
+                    "action": "enregistrement_clic",
+                    "article": row['nom'],
+                    "prix": row['prix']
+                }
+                # Envoi rapide en arrière-plan
+                requests.post(URL_PASSERELLE, json=payload_clic, timeout=4)
+            except Exception:
+                pass  # Ignore l'erreur si la connexion échoue pour ne pas bloquer le client
+            # Redirection automatique vers WhatsApp
+            js = f"window.open('{url_whatsapp}')"
+            st.components.v1.html(f"<script>{js}</script>", height=0)
             # Bouton Streamlit qui compte les clics de manière sécurisée
             if st.button(f"💬 Commander sur WhatsApp", key=f"btn_{row['nom']}"):
                 if 'suivi_clics' not in st.session_state:
