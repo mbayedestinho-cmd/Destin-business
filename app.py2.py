@@ -147,7 +147,6 @@ if not df.empty:
     cols = st.columns(3)
     for index, row in df.iterrows():
         with cols[index % 3]:
-# Nettoyage et formatage du prix pour l'affichage et WhatsApp
             try:
                 prix_formate = int(row['prix'])
                 text_prix = f"{prix_formate:,} FCFA"
@@ -158,31 +157,31 @@ if not df.empty:
             txt_whatsapp = f"Bonjour Collection Luxe N'Djamena, je souhaite commander cette pièce :\n\n- *Article :* {row['nom']}\n- *Prix :* {text_prix}"
             url_whatsapp = f"https://wa.me/NUMERO_WHATSAPP?text={urllib.parse.quote(txt_whatsapp)}"
             # Affichage du visuel de la carte HTML
-    st.markdown(f"""
-    <div class="product-card">
-    <img class="product-image" src="{row['image']}">
-                <h3 style='font-family: "Playfair Display", serif; font-size: 1.4rem; margin: 0 0 5px 0;'>{row['nom']}</h3>
-    <div class="product-price">{text_prix}</div>
-    </div>
-    """, unsafe_allow_html=True)
-# Bouton de commande avec enregistrement sécurisé du clic
-if st.button(f"💬 Commander sur WhatsApp", key=f"btn_{row['nom']}"):
-    try:
-        payload_clic = {
-            "action": "enregistrement_clic",
-            "article": row['nom'],
-            "prix": row['prix']
-        }
-        requests.post(URL_PASSERELLE, json=payload_clic, timeout=4)
-    except Exception:
-        pass
-    # Redirection automatique vers WhatsApp
-    js = f"window.open('{url_whatsapp}')"
-    st.components.v1.html(f"<script>{js}</script>", height=0)
-   # Fermeture propre de la carte HTML
-    st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown(f"""
+                <div class="product-card">
+                    <img class="product-image" src="{row['image']}">
+                    <h3 style='font-family: "Playfair Display", serif; font-size: 1.4rem; margin: 0 0 5px 0;'>{row['nom']}</h3>
+                    <div class="product-price">{text_prix}</div>
+                </div>
+            """, unsafe_allow_html=True)
+            # Bouton de commande avec enregistrement sécurisé du clic
+            if st.button(f"💬 Commander sur WhatsApp", key=f"btn_{row['nom']}"):
+                try:
+                    payload_clic = {
+                        "action": "enregistrement_clic",
+                        "article": row['nom'],
+                        "prix": row['prix']
+                    }
+                    requests.post(URL_PASSERELLE, json=payload_clic, timeout=4)
+                except Exception:
+                    pass
+                # Redirection automatique vers WhatsApp
+                js = f"window.open('{url_whatsapp}')"
+                st.components.v1.html(f"<script>{js}</script>", height=0)
+            # Fermeture propre de la carte HTML
+            st.markdown("</div>", unsafe_allow_html=True)
 else:
-    st.info("Le catalogue est en cours de mise à jour. Revenez dans un instant !")         
+    st.info("Le catalogue est en cours de mise à jour. Revenez dans un instant !")
 # --- PANNEAU DE CONTRÔLE ADMIN SÉCURISÉ ---
 with st.sidebar:
     st.markdown("### ⚙️ Authentification Admin")
