@@ -182,20 +182,7 @@ if not df.empty:
             st.markdown("</div>", unsafe_allow_html=True)
 else:
     st.info("Le catalogue est en cours de mise à jour. Revenez dans un instant !")
-# ==============================================================================
-# L'intrus magique : le bouton Streamlit qui compte vos clics
-if st.button(f"💬 Commander sur WhatsApp", key=f"btn_{row['nom']}"):
-    nom_article = row['nom']
-    st.session_state['suivi_clics'][nom_article] = st.session_state['suivi_clics'].get(nom_article, 0) + 1
-   
-    # Script pour ouvrir automatiquement l'onglet WhatsApp
-    js = f"window.open('{url_whatsapp}')"
-    st.components.v1.html(f"<script>{js}</script>", height=0)
-   
-# On referme la carte HTML proprement
-st.markdown("</div>", unsafe_allow_html=True)
-else:
-    st.info("Le catalogue est en cours de mise à jour. Revenez dans un instant !")
+
 # --- PANNEAU DE CONTRÔLE ADMIN SÉCURISÉ ---
 with st.sidebar:
     st.markdown("### ⚙️ Authentification Admin")
