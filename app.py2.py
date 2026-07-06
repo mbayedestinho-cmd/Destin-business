@@ -1,5 +1,8 @@
 import streamlit as st
 import pandas as pd
+# --- INITIALISATION DE LA MÉMOIRE DE TRACAGE ---
+if 'suivi_clics' not in st.session_state:
+    st.session_state['suivi_clics'] = {}
 import requests
 import urllib.parse
 # 1. Configuration de la page
@@ -10,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 # --- VOS CONFIGURATIONS ---
-NUMERO_WHATSAPP = "23566000000"  # Remplacer par votre numéro (sans +)
+NUMERO_WHATSAPP = "23408167043143"  # Remplacer par votre numéro (sans +)
 MOT_DE_PASSE_ADMIN = "Luxe2026"   # Votre mot de passe secret pour la gestion
 URL_PASSERELLE = "https://script.google.com/macros/s/XXXXX/exec" # Votre lien d'exécution Apps Script
 # 2. Design Haute Couture : Alignement parfait avec votre capture d'écran
@@ -154,14 +157,24 @@ if not df.empty:
             url_whatsapp = f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(txt_whatsapp)}"
            
             # Affichage de la carte
-            st.markdown(f"""
-                <div class="product-card">
-                    <img class="product-image" src="{row['image']}">
-                    <h3 style='font-family: "Playfair Display", serif; font-size: 1.4rem; margin: 0 0 5px 0;'>{row['nom']}</h3>
-                    <div class="product-price">{text_prix}</div>
-                    <a href="{url_whatsapp}" target="_blank" class="whatsapp-btn">🛍️ Commander sur WhatsApp</a>
-                </div>
-            """, unsafe_allow_html=True)
+            # COLLEZ CE BLOC À LA PLACE :
+st.markdown(f"""
+    <div class="product-card">
+        <img class="product-image" src="{row['image']}">
+        <h3 style='font-family: "Playfair Display", serif; font-size: 1.4rem; margin: 0 0 5px 0;'>{row['nom']}</h3>
+        <div class="product-price">{text_prix}</div>
+""", unsafe_allow_html=True)
+# L'intrus magique : le bouton Streamlit qui compte vos clics
+if st.button(f"💬 Commander sur WhatsApp", key=f"btn_{row['nom']}"):
+    nom_article = row['nom']
+    st.session_state['suivi_clics'][nom_article] = st.session_state['suivi_clics'].get(nom_article, 0) + 1
+   
+    # Script pour ouvrir automatiquement l'onglet WhatsApp
+    js = f"window.open('{url_whatsapp}')"
+    st.components.v1.html(f"<script>{js}</script>", height=0)
+   
+# On referme la carte HTML proprement
+st.markdown("</div>", unsafe_allow_html=True)
 else:
     st.info("Le catalogue est en cours de mise à jour. Revenez dans un instant !")
 # --- PANNEAU DE CONTRÔLE ADMIN SÉCURISÉ ---
@@ -172,6 +185,42 @@ with st.sidebar:
     if password_input == MOT_DE_PASSE_ADMIN:
         st.success("Accès autorisé ✅")
         st.write("---")
+            # =========================================================
+    # LE TABLEAU DE BORD (À INSÉRER ICI AVEC 4 ESPACES D'INDENTATION)
+    # =========================================================
+    st.title("📊 Tableau de Bord & Performance")
+    st.markdown("Suivi des vêtements les plus sollicités par vos clients.")
+    # 1. Préparation des données pour le tableur
+    if not st.session_state.get('suivi_clics'):
+        # Si aucun clic aujourd'hui, on met des données de simulation pour tester le design
+        donnees_test = {
+            "Nom du Vêtement": ["Costume Slim Fit", "Boubou Royal Fil d'Or", "Ensemble Casual"],
+            "Demandes WhatsApp": [0, 0, 0]
+        }
+        df_stats = pd.DataFrame(donnees_test)
+    else:
+        # Si des clients cliquent, le vrai tableau se construit tout seul !
+        df_stats = pd.DataFrame(list(st.session_state['suivi_clics'].items()),
+                                columns=["Nom du Vêtement", "Demandes WhatsApp"])
+    # On trie pour mettre le plus vendu en haut
+    df_stats = df_stats.sort_values(by="Demandes WhatsApp", ascending=False)
+    # 2. Les indicateurs en gros chiffres
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric(label="👥 Total des clics clients", value=f"{df_stats['Demandes WhatsApp'].sum()} clics")
+    with col2:
+        top_produit = df_stats["Nom du Vêtement"].iloc[0] if df_stats["Demandes WhatsApp"].sum() > 0 else "Aucun pour l'instant"
+        st.metric(label="🔥 Le plus recherché", value=top_produit)
+    st.markdown("---")
+    # 3. Affichage du Tableur interactif
+    st.subheader("📈 Classement détaillé")
+    st.dataframe(df_stats, use_container_width=True, hide_index=True)
+    # 4. Affichage du Graphique
+    st.subheader("📊 Graphique des tendances")
+    st.bar_chart(data=df_stats, x="Nom du Vêtement", y="Demandes WhatsApp")
+   
+    st.write("---") # Petite ligne de séparation visuelle
+    # =========================================================
        
         st.markdown("### ➕ Ajouter un nouvel article")
         with st.form("form_ajout", clear_on_submit=True):
