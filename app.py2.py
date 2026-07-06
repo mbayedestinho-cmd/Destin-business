@@ -111,6 +111,16 @@ st.markdown("""
         background-color: #b58328 !important;
         color: white !important;
     }
+    /* 🟢 AJOUTEZ CE BLOC JUSTE ICI : */
+.main-title {
+    font-family: 'Playfair Display', serif !important;
+    font-size: clamp(1.5rem, 7vw, 3.2rem) !important; /* Réduit la taille sur mobile pour que ça passe ! */
+    font-weight: 700 !important;
+    color: #1a1a1a !important;
+    text-align: center !important;
+    line-height: 1.1 !important;
+    white-space: nowrap !important; /* Interdit au téléphone de couper les mots */
+}
     </style>
 """, unsafe_allow_html=True)
 # --- VISUELS DE L'EN-TÊTE COMPOSÉS COMME SUR L'ÉCRAN ---
