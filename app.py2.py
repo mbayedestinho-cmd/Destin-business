@@ -187,54 +187,15 @@ else:
 with st.sidebar:
     st.markdown("### ⚙️ Authentification Admin")
     password_input = st.text_input("Entrez le mot de passe de la boutique", type="password")
-   
     if password_input == MOT_DE_PASSE_ADMIN:
-        st.success("Accès autorisé ✅")
+        st.success("Accès autorisé 🔓")
         st.write("---")
-            # =========================================================
-    # LE TABLEAU DE BORD (À INSÉRER ICI AVEC 4 ESPACES D'INDENTATION)
-    # =========================================================
-    st.title("📊 Tableau de Bord & Performance")
-    st.markdown("Suivi des vêtements les plus sollicités par vos clients.")
-    # 1. Préparation des données pour le tableur
-    if not st.session_state.get('suivi_clics'):
-        # Si aucun clic aujourd'hui, on met des données de simulation pour tester le design
-        donnees_test = {
-            "Nom du Vêtement": ["Costume Slim Fit", "Boubou Royal Fil d'Or", "Ensemble Casual"],
-            "Demandes WhatsApp": [0, 0, 0]
-        }
-        df_stats = pd.DataFrame(donnees_test)
-    else:
-        # Si des clients cliquent, le vrai tableau se construit tout seul !
-        df_stats = pd.DataFrame(list(st.session_state['suivi_clics'].items()),
-                                columns=["Nom du Vêtement", "Demandes WhatsApp"])
-    # On trie pour mettre le plus vendu en haut
-    df_stats = df_stats.sort_values(by="Demandes WhatsApp", ascending=False)
-    # 2. Les indicateurs en gros chiffres
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric(label="👥 Total des clics clients", value=f"{df_stats['Demandes WhatsApp'].sum()} clics")
-    with col2:
-        top_produit = df_stats["Nom du Vêtement"].iloc[0] if df_stats["Demandes WhatsApp"].sum() > 0 else "Aucun pour l'instant"
-        st.metric(label="🔥 Le plus recherché", value=top_produit)
-    st.markdown("---")
-    # 3. Affichage du Tableur interactif
-    st.subheader("📈 Classement détaillé")
-    st.dataframe(df_stats, use_container_width=True, hide_index=True)
-    # 4. Affichage du Graphique
-    st.subheader("📊 Graphique des tendances")
-    st.bar_chart(data=df_stats, x="Nom du Vêtement", y="Demandes WhatsApp")
-   
-    st.write("---") # Petite ligne de séparation visuelle
-    # =========================================================
-       
         st.markdown("### ➕ Ajouter un nouvel article")
         with st.form("form_ajout", clear_on_submit=True):
             nom = st.text_input("Nom du vêtement / de la pièce :")
             prix = st.number_input("Prix de vente en boutique (FCFA) :", min_value=0, step=5000)
             img_url = st.text_input("Lien direct (URL) de la photo :")
             bouton_ajout = st.form_submit_button("🚀 Mettre en vente immédiatement")
-           
             if bouton_ajout:
                 if nom and prix and img_url:
                     payload = {"nom": nom, "prix": prix, "image": img_url}
@@ -243,10 +204,10 @@ with st.sidebar:
                         if res.status_code == 200:
                             st.success("🎉 Article ajouté avec succès ! Rafraîchissez la page.")
                         else:
-                            st.error(f"La passerelle Google a renvoyé un code d'erreur : {res.status_code}")
+                            st.error(f"🔴 La passerelle Google a renvoyé un code d'erreur : {res.status_code}")
                     except Exception as e:
-                        st.error(f"Erreur de communication : {e}")
+                        st.error(f"❌ Erreur de communication : {e}")
                 else:
-                    st.warning("Veuillez remplir tous les champs obligatoires.")
+                    st.warning("⚠️ Veuillez remplir tous les champs obligatoires.")
     elif password_input != "":
         st.error("Mot de passe incorrect ❌")
