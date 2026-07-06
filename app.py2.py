@@ -180,7 +180,7 @@ if st.button(f"💬 Commander sur WhatsApp", key=f"btn_{row['nom']}"):
     js = f"window.open('{url_whatsapp}')"
     st.components.v1.html(f"<script>{js}</script>", height=0)
    # Fermeture propre de la carte HTML
-   st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
    else:
    st.info("Le catalogue est en cours de mise à jour. Revenez dans un instant !")         
 # --- PANNEAU DE CONTRÔLE ADMIN SÉCURISÉ ---
