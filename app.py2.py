@@ -148,23 +148,23 @@ if not df.empty:
     for index, row in df.iterrows():
         with cols[index % 3]:
 # Nettoyage et formatage du prix pour l'affichage et WhatsApp
-        try:
-            prix_formate = int(row['prix'])
-            text_prix = f"{prix_formate:,} FCFA"
-except Exception:
-    text_prix = f"{row['prix']} FCFA"
-    prix_formate = row['prix']
-# Construction du message de commande automatique
-txt_whatsapp = f"Bonjour Collection Luxe N'Djamena, je souhaite commander cette pièce :\n\n- *Article :* {row['nom']}\n- *Prix :* {text_prix}"
-url_whatsapp = f"https://wa.me/NUMERO_WHATSAPP?text={urllib.parse.quote(txt_whatsapp)}"
-# Affichage du visuel de la carte HTML
-st.markdown(f"""
+            try:
+                prix_formate = int(row['prix'])
+                text_prix = f"{prix_formate:,} FCFA"
+            except Exception:
+                text_prix = f"{row['prix']} FCFA"
+                prix_formate = row['prix']
+            # Construction du message de commande automatique
+            txt_whatsapp = f"Bonjour Collection Luxe N'Djamena, je souhaite commander cette pièce :\n\n- *Article :* {row['nom']}\n- *Prix :* {text_prix}"
+            url_whatsapp = f"https://wa.me/NUMERO_WHATSAPP?text={urllib.parse.quote(txt_whatsapp)}"
+            # Affichage du visuel de la carte HTML
+    st.markdown(f"""
     <div class="product-card">
-        <img class="product-image" src="{row['image']}">
-        <h3 style='font-family: "Playfair Display", serif; font-size: 1.4rem; margin: 0 0 5px 0;'>{row['nom']}</h3>
-        <div class="product-price">{text_prix}</div>
+    <img class="product-image" src="{row['image']}">
+                <h3 style='font-family: "Playfair Display", serif; font-size: 1.4rem; margin: 0 0 5px 0;'>{row['nom']}</h3>
+    <div class="product-price">{text_prix}</div>
     </div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 # Bouton de commande avec enregistrement sécurisé du clic
 if st.button(f"💬 Commander sur WhatsApp", key=f"btn_{row['nom']}"):
     try:
