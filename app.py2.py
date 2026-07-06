@@ -181,8 +181,8 @@ if st.button(f"💬 Commander sur WhatsApp", key=f"btn_{row['nom']}"):
     st.components.v1.html(f"<script>{js}</script>", height=0)
    # Fermeture propre de la carte HTML
     st.markdown("</div>", unsafe_allow_html=True)
-   else:
-   st.info("Le catalogue est en cours de mise à jour. Revenez dans un instant !")         
+else:
+    st.info("Le catalogue est en cours de mise à jour. Revenez dans un instant !")         
 # --- PANNEAU DE CONTRÔLE ADMIN SÉCURISÉ ---
 with st.sidebar:
     st.markdown("### ⚙️ Authentification Admin")
