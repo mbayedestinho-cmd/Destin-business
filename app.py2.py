@@ -172,7 +172,7 @@ if not df.empty:
                         "article": row['nom'],
                         "prix": row['prix']
                     }
-                    requests.post(URL_PASSERELLE, json=payload_clic, timeout=4)
+                    requests.post(https://script.google.com/macros/s/AKfycbzP9yK0pXVfl6jEb1T4Y65ltd6oFC3dVWwpeyrlx8Nxe2ddtKTncRZ0AhMUxnylLu7S/exec, json=payload_clic, timeout=4)
                 except Exception as e:
                     st.error(f"Erreur technique de suivi: {e}")
                 # Redirection automatique vers WhatsApp
