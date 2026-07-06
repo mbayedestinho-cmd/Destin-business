@@ -155,7 +155,7 @@ if not df.empty:
                 prix_formate = row['prix']
             # Construction du message de commande automatique
             txt_whatsapp = f"Bonjour Collection Luxe N'Djamena, je souhaite commander cette pièce :\n\n- *Article :* {row['nom']}\n- *Prix :* {text_prix}"
-            url_whatsapp = f"https://wa.me/NUMERO_WHATSAPP?text={urllib.parse.quote(txt_whatsapp)}"
+            url_whatsapp = f"https://wa.me/23408167043143?text={urllib.parse.quote(txt_whatsapp)}"
             # Affichage du visuel de la carte HTML
             st.markdown(f"""
                 <div class="product-card">
