@@ -1,131 +1,187 @@
 import streamlit as st
-import requests
 import pandas as pd
+import requests
+import urllib.parse
 # 1. Configuration de la page
 st.set_page_config(
     page_title="Collection Luxe N'Djamena",
     page_icon="✨",
-    layout="wide", # Utilise tout l'écran pour un effet moderne
-    initial_sidebar_state="expanded"
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
-# 2. Design VIP : Injection de CSS personnalisé pour le style Mode/Luxe
+# --- VOS CONFIGURATIONS ---
+NUMERO_WHATSAPP = "23566000000"  # Remplacer par votre numéro (sans +)
+MOT_DE_PASSE_ADMIN = "Luxe2026"   # Votre mot de passe secret pour la gestion
+URL_PASSERELLE = "https://script.google.com/macros/s/XXXXX/exec" # Votre lien d'exécution Apps Script
+# 2. Design Haute Couture : Alignement parfait avec votre capture d'écran
 st.markdown("""
     <style>
-    /* Changer la police globale et le fond */
-    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Poppins:wght@300;400;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Poppins:wght@300;400;500&display=swap');
    
     html, body, [data-testid="stAppViewContainer"] {
-        background-color: #fcfbf9; /* Fond blanc cassé très élégant */
+        background-color: #ffffff;
         font-family: 'Poppins', sans-serif;
     }
    
-    /* Style des titres en police classique/luxe */
-    h1, h2, h3 {
+    /* Style exact du grand titre empilé de la capture d'écran */
+    .main-title {
         font-family: 'Playfair Display', serif !important;
+        font-size: 3.2rem !important;
+        font-weight: 700 !important;
         color: #1a1a1a !important;
-        text-align: center;
+        text-align: center !important;
+        line-height: 1.2 !important;
+        letter-spacing: 1px !important;
+        margin-top: 20px;
+        margin-bottom: 5px;
     }
    
-    /* Design des cartes de vêtements */
+    .stars-icon {
+        text-align: center !important;
+        font-size: 2.5rem !important;
+        margin-bottom: 15px;
+        line-height: 1;
+    }
+   
+    .subtitle {
+        text-align: center !important;
+        color: #777777 !important;
+        font-style: italic !important;
+        font-size: 1.2rem !important;
+        font-family: 'Poppins', sans-serif !important;
+        margin-bottom: 40px;
+    }
+   
+    .section-title {
+        font-family: 'Playfair Display', serif !important;
+        font-size: 2.2rem !important;
+        font-weight: 700 !important;
+        color: #1a1a1a !important;
+        text-align: center !important;
+        margin-top: 30px;
+        margin-bottom: 35px;
+    }
+   
+    /* Cartes Produits élégantes */
     .product-card {
         background-color: #ffffff;
-        border: 1px solid #eef0f2;
+        border: 1px solid #f0f0f0;
         border-radius: 12px;
-        padding: 15px;
+        padding: 16px;
         text-align: center;
-        box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.03);
+        box-shadow: 0px 4px 20px rgba(0, 0, 0, 0.02);
         transition: transform 0.3s ease, box-shadow 0.3s ease;
-        margin-bottom: 25px;
+        margin-bottom: 30px;
     }
     .product-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0px 10px 25px rgba(0, 0, 0, 0.08);
+        transform: translateY(-4px);
+        box-shadow: 0px 12px 30px rgba(0, 0, 0, 0.06);
     }
    
-    /* Style des images pour qu'elles soient toutes uniformes */
     .product-image {
         border-radius: 8px;
         object-fit: cover;
         width: 100%;
-        height: 280px;
+        height: 320px;
         margin-bottom: 15px;
     }
    
-    /* Prix mis en valeur */
     .product-price {
-        color: #b58328; /* Couleur Or/Bronze pour le côté Premium */
+        color: #b58328;
         font-weight: 600;
-        font-size: 1.2rem;
-        margin: 10px 0;
+        font-size: 1.25rem;
+        margin: 8px 0 16px 0;
     }
    
-    /* Personnalisation des boutons Streamlit */
-    div.stButton > button {
-        background-color: #1a1a1a !important; /* Bouton noir chic */
+    /* Bouton d'achat WhatsApp Luxe */
+    .whatsapp-btn {
+        display: inline-block;
+        background-color: #1a1a1a !important;
         color: white !important;
-        border-radius: 6px !important;
-        border: none !important;
+        text-decoration: none !important;
+        border-radius: 6px;
         width: 100%;
-        padding: 10px 0 !important;
-        font-weight: 400 !important;
-        transition: background 0.3s !important;
+        padding: 11px 0;
+        font-weight: 400;
+        font-size: 0.95rem;
+        transition: background 0.3s;
+        text-align: center;
     }
-    div.stButton > button:hover {
-        background-color: #b58328 !important; /* Devient Or au survol */
+    .whatsapp-btn:hover {
+        background-color: #b58328 !important;
         color: white !important;
     }
     </style>
 """, unsafe_allow_html=True)
-# --- EN-TÊTE DE LA BOUTIQUE ---
-st.markdown("<h1>✨ COLLECTION LUXE N'DJAMENA ✨</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #666; font-style: italic; font-size: 1.1rem;'>L'élégance et la haute couture à votre portée</p>", unsafe_allow_html=True)
-st.write("---")
-# --- CONNEXION RÉELLE À VOTRE GOOGLE SHEETS ---
+# --- VISUELS DE L'EN-TÊTE COMPOSÉS COMME SUR L'ÉCRAN ---
+st.markdown('<h1 class="main-title">COLLECTION<br>LUXE<br>N\'DJAMENA</h1>', unsafe_allow_html=True)
+st.markdown('<div class="stars-icon">✨</div>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">L\'élégance et la haute couture à votre portée</p>', unsafe_allow_html=True)
+# --- CONNEXION À VOTRE GOOGLE SHEETS (LECTURE) ---
 try:
-    # 1. Récupération de l'ID depuis vos secrets Streamlit Cloud
     id_sheet = st.secrets["ID_DU_SHEET"]
-   
-    # 2. Construction du lien d'export CSV automatique
     url_csv = f"https://docs.google.com/spreadsheets/d/{id_sheet}/gviz/tq?tqx=out:csv"
-   
-    # 3. Lecture et traitement propre du tableau avec Pandas
     df = pd.read_csv(url_csv)
-   
-    # Nettoyage de sécurité : on force les noms de colonnes en minuscules
     df.columns = [col.lower().strip() for col in df.columns]
 except Exception as e:
-    st.error(f"⚠️ Impossible de charger le catalogue depuis Google Sheets : {e}")
-    # En cas de problème, crée un tableau vide pour éviter le crash
+    st.error(f"⚠️ Erreur d'accès au catalogue : {e}")
     df = pd.DataFrame(columns=["nom", "prix", "image"])
-# --- AFFICHAGE EN GRILLE MODERNE (3 colonnes) ---
-st.subheader("🛍️ Notre Catalogue Exclusif")
-# Création des colonnes dynamiques
-cols = st.columns(3)
-for index, row in df.iterrows():
-    # Sélection de la colonne (0, 1 ou 2)
-    with cols[index % 3]:
-        # Encapsulation dans une carte HTML stylisée par notre CSS
-        st.markdown(f"""
-            <div class="product-card">
-                <img class="product-image" src="{row['image']}">
-                <h3 style='font-size: 1.3rem; margin-bottom: 5px;'>{row['nom']}</h3>
-                <div class="product-price">{int(row['prix']):,} FCFA</div>
-            </div>
-        """, unsafe_allow_html=True)
-       
-        # Bouton d'action sous la carte
-        if st.button(f"Commander {row['nom']}", key=f"btn_{index}"):
-            st.success(f"🛒 {row['nom']} a été ajouté à votre panier !")
-# --- PANNEAU ADMIN (Dissimulé proprement dans la barre latérale) ---
+# --- LE CATALOGUE EXCLUSIF ---
+st.markdown('<h2 class="section-title">🛍️ Notre Catalogue Exclusif</h2>', unsafe_allow_html=True)
+if not df.empty:
+    cols = st.columns(3)
+    for index, row in df.iterrows():
+        with cols[index % 3]:
+            # Nettoyage et formatage du prix pour l'affichage et WhatsApp
+            try:
+                prix_formate = int(row['prix'])
+                text_prix = f"{prix_formate:,} FCFA"
+            except:
+                text_prix = f"{row['prix']} FCFA"
+                prix_formate = row['prix']
+            # Construction du message de commande automatique
+            txt_whatsapp = f"Bonjour Collection Luxe N'Djamena, je souhaite commander cette pièce :\n\n- *Article :* {row['nom']}\n- *Prix :* {text_prix}"
+            url_whatsapp = f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(txt_whatsapp)}"
+           
+            # Affichage de la carte
+            st.markdown(f"""
+                <div class="product-card">
+                    <img class="product-image" src="{row['image']}">
+                    <h3 style='font-family: "Playfair Display", serif; font-size: 1.4rem; margin: 0 0 5px 0;'>{row['nom']}</h3>
+                    <div class="product-price">{text_prix}</div>
+                    <a href="{url_whatsapp}" target="_blank" class="whatsapp-btn">🛍️ Commander sur WhatsApp</a>
+                </div>
+            """, unsafe_allow_html=True)
+else:
+    st.info("Le catalogue est en cours de mise à jour. Revenez dans un instant !")
+# --- PANNEAU DE CONTRÔLE ADMIN SÉCURISÉ ---
 with st.sidebar:
-    st.markdown("<h2 style='text-align: left;'>⚙️ Zone Gestion Admin</h2>", unsafe_allow_html=True)
+    st.markdown("### ⚙️ Authentification Admin")
+    password_input = st.text_input("Entrez le mot de passe de la boutique", type="password")
    
-    with st.expander("➕ Ajouter une pièce"):
-        st.text_input("Nom de l'article")
-        st.number_input("Prix (FCFA)", min_value=0)
-        st.text_input("Lien de la photo")
-        st.button("Publier l'article")
+    if password_input == MOT_DE_PASSE_ADMIN:
+        st.success("Accès autorisé ✅")
+        st.write("---")
        
-    with st.expander("🗑️ Supprimer une pièce"):
-        st.selectbox("Choisir l'article à retirer", df['nom'].tolist() if not df.empty else ["Aucun"])
-        st.button("Confirmer la suppression")
+        st.markdown("### ➕ Ajouter un nouvel article")
+        with st.form("form_ajout", clear_on_submit=True):
+            nom = st.text_input("Nom du vêtement / de la pièce :")
+            prix = st.number_input("Prix de vente en boutique (FCFA) :", min_value=0, step=5000)
+            img_url = st.text_input("Lien direct (URL) de la photo :")
+            bouton_ajout = st.form_submit_button("🚀 Mettre en vente immédiatement")
+           
+            if bouton_ajout:
+                if nom and prix and img_url:
+                    payload = {"nom": nom, "prix": prix, "image": img_url}
+                    try:
+                        res = requests.post(URL_PASSERELLE, json=payload, timeout=10)
+                        if res.status_code == 200:
+                            st.success("🎉 Article ajouté avec succès ! Rafraîchissez la page.")
+                        else:
+                            st.error(f"La passerelle Google a renvoyé un code d'erreur : {res.status_code}")
+                    except Exception as e:
+                        st.error(f"Erreur de communication : {e}")
+                else:
+                    st.warning("Veuillez remplir tous les champs obligatoires.")
+    elif password_input != "":
+        st.error("Mot de passe incorrect ❌")
