@@ -229,3 +229,27 @@ with st.sidebar:
                            
                     except Exception as e:
                         st.error(f"⚠️ Échec du téléversement de l'image : {e}")
+                                # --- À COLLER JUSTE EN DESSOUS DE LA LIGNE 231 ---
+        st.markdown("---")
+        st.markdown("### 🗑️ Supprimer un article")
+       
+        if not df.empty:
+            liste_articles = df.iloc[:, 0].tolist()
+            article_a_supprimer = st.selectbox("Sélectionnez l'article à retirer :", liste_articles)
+           
+            if st.button("🔴 Supprimer définitivement"):
+                try:
+                    payload_suppression = {
+                        "action": "suppression_article",
+                        "nom": article_a_supprimer
+                    }
+                    response = requests.post(URL_PASSERELLE, json=payload_suppression, timeout=4)
+                   
+                    if response.status_code == 200:
+                        st.success(f"L'article '{article_a_supprimer}' a été retiré avec succès ! Rappuyez sur F5.")
+                    else:
+                        st.error("Impossible de joindre Google Sheets pour la suppression.")
+                except Exception as e:
+                    st.error(f"Erreur de connexion : {e}")
+elif password_input != "":
+    st.error("Mot de passe incorrect ❌")
