@@ -197,54 +197,59 @@ with st.sidebar:
             bouton_ajout = st.form_submit_button("🚀 Mettre en vente immédiatement")
                         # --- BLOC CORRIGÉ SANS CARACTÈRE PARASITE ---
             if bouton_ajout and nom and prix and uploaded_file:
-                with st.spinner("⚡ Traitement et téléversement de la photo..."):
+                           with st.spinner("Téléversement et enregistrement en cours..."):
                 try:
-                # 1. Conversion de l'image en Base64
-                img_bytes = uploaded_file.read()
-                base64_image = base64.b64encode(img_bytes).decode('utf-8')
+                    # 1. Conversion de l'image en Base64
+                    img_bytes = uploaded_file.read()
+                    base64_image = base64.b64encode(img_bytes).decode('utf-8')
+                   
+                    # 2. Envoi à l'API ImgBB
+                    api_key = st.secrets.get("IMGBB_API_KEY", "70be83b276ba6ccbf03b71597dfc2a5d")
+                    res_img = requests.post(
+                        "https://api.imgbb.com/1/upload",
+                        data={"key": api_key, "image": base64_image}
+                    )
+                    img_url = res_img.json()["data"]["url"]
+                   
+                    # 3. Préparation et envoi vers Google Sheets
+                    payload = {
+                        "nom": nom,
+                        "prix": prix,
+                        "image": img_url,
+                        "tailles": tailles_input,
+                        "couleurs": couleurs_input,
+                        "stock": stock_input
+                    }
+                   
+                    res = requests.post(URL_PASSERELLE, json=payload, timeout=10)
+                    if res.status_code == 200:
+                        st.success("🎉 Article mis en ligne avec succès ! Actualisez la page (F5).")
+                    else:
+                        st.error("Erreur lors de l'enregistrement dans le catalogue Sheets.")
                        
-                       # 2. Envoi à l'API ImgBB
-                       api_key = st.secrets.get("IMGBB_API_KEY", "70be83b276ba6ccbf03b71597dfc2a5d")
-                       res_img = requests.post(
-                       "https://api.imgbb.com/1/upload",
-                       data={"key": api_key, "image": base64_image}
-                       )
-                       img_url = res_img.json()["data"]["url"]
-                       
-                       # 3. Préparation et envoi vers Google Sheets
-                       payload = {
-                       "nom": nom,
-                       "prix": prix,
-                       "image": img_url,
-                       "tailles": tailles_input,
-                       "couleurs": couleurs_input,
-                       "stock": stock_input
-                       }
-                       res = requests.post(URL_PASSERELLE, json=payload, timeout=10)
-                       if res.status_code == 200:
-                       st.success("🎉 Article mis en ligne avec succès ! Actualisez la page (F5).")
-                       else:
-                       st.error("Erreur lors de l'enregistrement dans le catalogue Sheets.")
-                       except Exception as e:
-                       st.error(f"⚠️ Échec du téléversement de l'image : {e}")
-                       # 🗑️ SECTION DE SUPPRESSION D'UN ARTICLE
-                       st.markdown("---")
-                       st.markdown("### 🗑️ Supprimer un article")
-                       if not df.empty:
-                       liste_articles = df.iloc[:, 0].tolist()
-                       article_a_supprimer = st.selectbox("Sélectionnez l'article à retirer :", liste_articles)
-                       if st.button("🔴 Supprimer définitivement"):
-                       try:
-                       payload_suppression = {
-                       "action": "suppression_article",
-                       "nom": article_a_supprimer
-                       }
-                       response = requests.post(URL_PASSERELLE, json=payload_suppression, timeout=4
-                       if response.status_code == 200:
-                       st.success(f"L'article '{article_a_supprimer}' a été retiré avec succès ! Rappuyez sur F5.")
-                       else:
-                       st.error("Impossible de joindre Google Sheets pour la suppression.")
-                       except Exception as e:
-                       st.error(f"Erreur de connexion : {e}"
-                       elif password_input != "":
-                       st.error("Mot de passe incorrect ❌")
+                except Exception as e:
+                    st.error(f"⚠️ Échec du téléversement de l'image : {e}")
+        # 🗑️ SECTION DE SUPPRESSION D'UN ARTICLE
+        st.markdown("---")
+        st.markdown("### 🗑️ Supprimer un article")
+       
+        if not df.empty:
+            liste_articles = df.iloc[:, 0].tolist()
+            article_a_supprimer = st.selectbox("Sélectionnez l'article à retirer :", liste_articles)
+           
+            if st.button("🔴 Supprimer définitivement"):
+                try:
+                    payload_suppression = {
+                        "action": "suppression_article",
+                        "nom": article_a_supprimer
+                    }
+                    response = requests.post(URL_PASSERELLE, json=payload_suppression, timeout=4)
+                   
+                    if response.status_code == 200:
+                        st.success(f"L'article '{article_a_supprimer}' a été retiré avec succès ! Rappuyez sur F5.")
+                    else:
+                        st.error("Impossible de joindre Google Sheets pour la suppression.")
+                except Exception as e:
+                    st.error(f"Erreur de connexion : {e}")
+    elif password_input != "":
+        st.error("Mot de passe incorrect ❌")
