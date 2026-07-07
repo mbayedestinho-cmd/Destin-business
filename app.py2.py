@@ -197,7 +197,7 @@ with st.sidebar:
             bouton_ajout = st.form_submit_button("🚀 Mettre en vente immédiatement")
                         # --- BLOC CORRIGÉ SANS CARACTÈRE PARASITE ---
             if bouton_ajout and nom and prix and uploaded_file:
-                           with st.spinner("Téléversement et enregistrement en cours..."):
+                        with st.spinner("Téléversement et enregistrement en cours..."):
                 try:
                     # 1. Conversion de l'image en Base64
                     img_bytes = uploaded_file.read()
