@@ -251,5 +251,5 @@ with st.sidebar:
                         st.error("Impossible de joindre Google Sheets pour la suppression.")
                 except Exception as e:
                     st.error(f"Erreur de connexion : {e}")
-elif password_input != "":
+                    elif password_input != "":
     st.error("Mot de passe incorrect ❌")
