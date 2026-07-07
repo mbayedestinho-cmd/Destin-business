@@ -243,7 +243,7 @@ with st.sidebar:
                        if response.status_code == 200:
                        st.success(f"L'article '{article_a_supprimer}' a été retiré avec succès ! Rappuyez sur F5.")
                        else:
-                       st.error("Impossible de joindre Google Sheets pour la suppression.
+                       st.error("Impossible de joindre Google Sheets pour la suppression.")
                        except Exception as e:
                        st.error(f"Erreur de connexion : {e}"
                        elif password_input != "":
