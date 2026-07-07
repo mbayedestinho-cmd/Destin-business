@@ -15,7 +15,7 @@ st.set_page_config(
 # --- VOS CONFIGURATIONS ---
 NUMERO_WHATSAPP = "23408167043143"  # Remplacer par votre numéro (sans +)
 MOT_DE_PASSE_ADMIN = "Luxe2026"   # Votre mot de passe secret pour la gestion
-URL_PASSERELLE = "https://script.google.com/macros/library/d/1fsMGGgJT_br5w374pnXFKgyOSjFkQqWrceX9R6M-yO-l7fRAqy4Whe3i/1" # Votre lien d'exécution Apps Script
+URL_PASSERELLE = "https://script.google.com/macros/s/AKfycbzP9yK0pXVfl6jEb1T4Y65ltd6oFC3dVWwpeyrlx8Nxe2ddtKTncRZ0AhMUxnylLu7S/exec" # Votre lien d'exécution Apps Script
 # 2. Design Haute Couture : Alignement parfait avec votre capture d'écran
 st.markdown("""
     <style>
