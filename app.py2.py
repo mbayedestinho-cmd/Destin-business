@@ -206,7 +206,32 @@ with st.sidebar:
                             st.error(f"🔴 La passerelle Google a renvoyé un code d'erreur : {res.status_code}")
                     except Exception as e:
                         st.error(f"❌ Erreur de communication : {e}")
-                else:
-                    st.warning("⚠️ Veuillez remplir tous les champs obligatoires.")
-    elif password_input != "":
-        st.error("Mot de passe incorrect ❌")
+                                        # ... (votre code existant de l'ajout d'article) ...
+                except Exception as e:
+                    st.error(f"Erreur : {e}")
+        # 🟢 COLLEZ VOTRE CODE DE SUPPRESSION EXACTEMENT ICI (aligné sur le "with st.form") :
+                # --- À COPIER ET COLLER À PARTIR DE LA LIGNE 213 JUSQU'À LA FIN ---
+        st.markdown("---")
+        st.markdown("### 🗑️ Supprimer un article")
+       
+        if not df.empty:
+            liste_articles = df.iloc[:, 0].tolist()  # Prend la première colonne (les noms)
+            article_a_supprimer = st.selectbox("Sélectionnez l'article à retirer :", liste_articles)
+           
+            if st.button("🔴 Supprimer définitivement"):
+                try:
+                    payload_suppression = {
+                        "action": "suppression_article",
+                        "nom": article_a_supprimer
+                    }
+                    response = requests.post(URL_PASSERELLE, json=payload_suppression, timeout=4)
+                   
+                    if response.status_code == 200:
+                        st.success(f"L'article '{article_a_supprimer}' a été retiré avec succès ! Rappuyez sur F5.")
+                    else:
+                        st.error("Impossible de joindre Google Sheets pour la suppression.")
+                except Exception as e:
+                    st.error(f"Erreur de connexion : {e}")
+elif password_input != "":
+    st.error("Mot de passe incorrect ❌")
+       
