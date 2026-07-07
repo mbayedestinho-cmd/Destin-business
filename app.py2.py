@@ -253,3 +253,6 @@ with st.sidebar:
                     st.error(f"Erreur de connexion : {e}")
     elif password_input != "":
         st.error("Mot de passe incorrect ❌")
+       
+    else:
+        st.warning("⚠️ Veuillez remplir tous les champs obligatoires.")
