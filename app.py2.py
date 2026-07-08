@@ -32,14 +32,40 @@ if 'cart' not in st.session_state:
     st.session_state.cart = []
 
 # Chargement
+# ====================== CHARGEMENT DES DONNÉES ======================
 try:
     id_sheet = st.secrets["ID_DU_SHEET"]
     url_csv = f"https://docs.google.com/spreadsheets/d/{id_sheet}/gviz/tq?tqx=out:csv&nocache={int(time.time())}"
+    
     df_raw = pd.read_csv(url_csv)
-    df_raw.columns = [col.lower().strip() for col in df_raw.columns]
+    
+    # Nettoyage des noms de colonnes
+    df_raw.columns = [str(col).lower().strip() for col in df_raw.columns]
+    
+    # === DIAGNOSTIC : Afficher les colonnes disponibles ===
+    st.info(f"Colonnes trouvées dans le Sheet : {df_raw.columns.tolist()}")
+    
+    # Renommage automatique des colonnes possibles
+    rename_dict = {
+        'price': 'prix',
+        'prix': 'prix',
+        'prix (fcfa)': 'prix',
+        'prix fcfa': 'prix',
+        'montant': 'prix',
+        'cout': 'prix'
+    }
+    df_raw = df_raw.rename(columns=rename_dict)
+    
+    # Vérification finale
+    if 'prix' not in df_raw.columns:
+        st.error("La colonne 'prix' n'existe pas. Vérifiez votre Google Sheet.")
+        st.stop()
+    
     df = df_raw.dropna(subset=['nom', 'prix', 'image']).copy()
     df_admin = df_raw.copy()
-except:
+
+except Exception as e:
+    st.error(f"Erreur lors du chargement des données : {str(e)}")
     df = pd.DataFrame()
     df_admin = pd.DataFrame()
 
