@@ -96,6 +96,9 @@ try:
     url_csv = f"https://docs.google.com/spreadsheets/d/{id_sheet}/gviz/tq?tqx=out:csv"
     df = pd.read_csv(url_csv)
     df.columns = [col.lower().strip() for col in df.columns]
+    
+    # 🧹 Nettoyage de sécurité : Supprime les lignes vides/incomplètes du catalogue pour éviter le bug "nan"
+    df = df.dropna(subset=['nom', 'prix', 'image'])
 except Exception as e:
     st.error(f"⚠️ Erreur d'accès au catalogue : {e}")
     df = pd.DataFrame(columns=["nom", "prix", "image"])
@@ -103,10 +106,10 @@ except Exception as e:
 # --- AFFICHAGE DE LA VITRINE ---
 if not df.empty:
     cols = st.columns(3)
-    for index, row in df.iterrows():
+    for index, row in df.reset_index().iterrows():
         with cols[index % 3]:
             try:
-                prix_formate = int(row['prix'])
+                prix_formate = int(float(row['prix']))
                 text_prix = f"{prix_formate:,} FCFA"
             except Exception:
                 text_prix = f"{row['prix']} FCFA"
@@ -155,7 +158,6 @@ with st.sidebar:
                             img_bytes = uploaded_file.read()
                             base64_image = base64.b64encode(img_bytes).decode('utf-8')
                            
-                            # Utilisation directe et forcée de votre nouvelle clé API ImgBB
                             api_key = "C0e31ddc27c82849461799d031c85ba6"
                             
                             res_img = requests.post(
@@ -182,7 +184,10 @@ with st.sidebar:
                             res = requests.post(URL_PASSERELLE, json=payload, timeout=10)
                             if res.status_code == 200:
                                 st.success("🎉 Article mis en ligne !")
-                                st.rerun()
+                                try:
+                                    st.rerun()
+                                except AttributeError:
+                                    st.experimental_rerun()
                             else:
                                 st.error("Erreur d'enregistrement dans Google Sheets.")
                         except Exception as e:
@@ -190,12 +195,12 @@ with st.sidebar:
                 else:
                     st.warning("Veuillez remplir les champs obligatoires (Nom, Prix, Photo).")
                             
-        # 🗑️ SECTION RETRAIT D'ARTICLE
+        # 🗑️ SECTION RETRAIT D'ARTICLE SÉCURISÉE
         st.markdown("---")
         st.markdown("### 🗑️ Retirer un article du catalogue")
        
         if not df.empty and 'nom' in df.columns:
-            liste_articles = df['nom'].tolist()
+            liste_articles = df['nom'].unique().tolist()
             article_a_supprimer = st.selectbox("Sélectionnez l'article à retirer :", liste_articles)
            
             if st.button("🔴 Supprimer définitivement"):
@@ -203,17 +208,20 @@ with st.sidebar:
                     try:
                         payload_suppression = {
                             "action": "suppression_article",
-                            "nom": article_a_supprimer
+                            "nom": str(article_a_supprimer)
                         }
-                        response = requests.post(URL_PASSERELLE, json=payload_suppression, timeout=5)
+                        response = requests.post(URL_PASSERELLE, json=payload_suppression, timeout=10)
                        
                         if response.status_code == 200:
                             st.success(f"'{article_a_supprimer}' a bien été retiré.")
-                            st.rerun()
+                            try:
+                                st.rerun()
+                            except AttributeError:
+                                st.experimental_rerun()
                         else:
-                            st.error("Impossible de valider la suppression sur Google Sheets.")
+                            st.error(f"Erreur de passerelle Google (Code: {response.status_code}).")
                     except Exception as e:
-                        st.error(f"Erreur réseau : {e}")
+                        st.error(f"⚠️ Impossible de valider la suppression : {e}")
         else:
             st.info("Aucun article disponible pour suppression.")
                         
