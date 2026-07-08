@@ -202,4 +202,4 @@ with st.sidebar:
     elif password:
         st.error("Mot de passe incorrect")
 
-st.caption("Destiny coorporationLTD © 2026")
+st.caption("Destiny corporationLTD© 2026")
