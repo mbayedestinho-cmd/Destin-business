@@ -18,7 +18,7 @@ st.markdown("""
 
 NUMERO_WHATSAPP = "23408167043143"
 MOT_DE_PASSE_ADMIN = "Luxe2026"
-URL_PASSERELLE = "https://script.google.com/macros/s/AKfycbwAtKtO_g5HWgeUe0XwSnWLgJuMMLrz6BXfmTDF5iQEVW8qjrZDos67S7VW8RBH-oco/exec"
+URL_PASSERELLE = "https://script.google.com/macros/s/AKfycbykGuq78OzBGqHT8C82NLehEeLtcKVkTkFhDa5l_Z8k8i0mX_EL2Fmnl57N6SLLvMRa5w/exec"
 
 st.title("Collection Luxe N'Djamena")
 
