@@ -60,7 +60,12 @@ if 'cart' not in st.session_state:
 
 # ====================== CHARGEMENT DES DONNÉES ======================
 try:
-    id_sheet = st.secrets["ID_DU_SHEET"]
+    id_sheet = st.secrets.get("ID_DU_SHEET")
+    
+    if not id_sheet:
+        st.error("❌ ID_DU_SHEET non configuré dans les secrets Streamlit.")
+        st.stop()
+    
     url_csv = f"https://docs.google.com/spreadsheets/d/{id_sheet}/gviz/tq?tqx=out:csv&nocache={int(time.time())}"
     df_raw = pd.read_csv(url_csv)
     df_raw.columns = [col.lower().strip() for col in df_raw.columns]
@@ -68,11 +73,12 @@ try:
     df = df_raw.dropna(subset=['nom', 'image']).copy()
     df_admin = df_raw.copy()
     
-    # Debug colonnes (visible uniquement en haut)
+    st.success(f"✅ {len(df)} articles chargés")
     st.caption(f"Colonnes détectées : {list(df_raw.columns)}")
     
 except Exception as e:
     st.error(f"Erreur de chargement des données : {e}")
+    st.info("💡 Assurez-vous que le Google Sheet est publié sur le web (Fichier > Publier sur le web).")
     df = pd.DataFrame()
     df_admin = pd.DataFrame()
 
