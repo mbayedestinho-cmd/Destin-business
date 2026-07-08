@@ -23,7 +23,8 @@ st.markdown("""
 # Configuration
 NUMERO_WHATSAPP = "23408167043143"
 MOT_DE_PASSE_ADMIN = "Luxe2026"
-URL_PASSERELLE = "https://script.google.com/macros/s/AKfycbykGuq78OzBGqHT8C82NLehEeLtcKVkTkFhDa5l_Z8k8i0mX_EL2Fmnl57N6SLLvMRa5w/exec" # ← Remplace par ton URL
+URL_PASSERELLE = "https://script.google.com/macros/s/AKfycbykGuq78OzBGqHT8C82NLehEeLtcKVkTkFhDa5l_Z8k8i0mX_EL2Fmnl57N6SLLvMRa5w/exec" # ← Remplace par ton URL réelle
+IMGBB_API_KEY = "945cbd1bd1a39645a2d3d04ffb7630ea" # ← Nouvelle clé intégrée
 
 st.markdown('<div class="hero"><h1 class="main-title">COLLECTION LUXE<br>N\'DJAMENA</h1></div>', unsafe_allow_html=True)
 
@@ -132,7 +133,6 @@ with st.sidebar:
     if password == MOT_DE_PASSE_ADMIN:
         st.success("Accès autorisé")
         
-        # AJOUT
         st.subheader("➕ Ajouter un article")
         with st.form("add_form", clear_on_submit=True):
             nom = st.text_input("Nom de l'article")
@@ -147,15 +147,14 @@ with st.sidebar:
                     with st.spinner("Ajout en cours..."):
                         try:
                             b64 = base64.b64encode(uploaded.read()).decode()
-                            api_key = st.secrets.get("IMGBB_API_KEY", "70be83b276ba6ccbf03b71597dfc2a5d")
-                            res_img = requests.post("https://api.imgbb.com/1/upload", data={"key": api_key, "image": b64})
+                            res_img = requests.post("https://api.imgbb.com/1/upload", data={"key": IMGBB_API_KEY, "image": b64})
                             res_json = res_img.json()
                             
                             if "data" in res_json and "url" in res_json["data"]:
                                 img_url = res_json["data"]["url"]
                             else:
-                                error_msg = res_json.get("error", {}).get("message", "Erreur inconnue")
-                                st.error(f"Erreur ImgBB : {error_msg}")
+                                error = res_json.get("error", {}).get("message", "Erreur inconnue")
+                                st.error(f"Erreur ImgBB : {error}")
                                 st.stop()
                             
                             payload = {
@@ -173,18 +172,17 @@ with st.sidebar:
                                 time.sleep(1.5)
                                 st.rerun()
                             else:
-                                st.error(f"Erreur serveur (code {r.status_code})")
+                                st.error("Erreur lors de l'enregistrement dans Google Sheets")
                         except Exception as e:
                             st.error(f"Erreur technique : {e}")
         
-        # Articles existants
         st.subheader("📋 Articles existants")
         if not df_admin.empty:
             st.dataframe(df_admin, use_container_width=True)
         else:
             st.info("Aucun article dans le catalogue.")
         
-        # Modifier & Supprimer (conservés)
+        # Modifier et Supprimer (comme avant)
         st.subheader("✏️ Modifier / Supprimer")
         if not df_admin.empty:
             article = st.selectbox("Choisir un article", df_admin['nom'].dropna().astype(str).unique())
@@ -199,7 +197,7 @@ with st.sidebar:
                     except Exception as e:
                         st.error(e)
             with col2:
-                st.info("Modification disponible ci-dessous")
+                st.info("Modification complète bientôt disponible")
         
     elif password:
         st.error("Mot de passe incorrect")
