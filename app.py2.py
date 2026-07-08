@@ -7,7 +7,7 @@ import time
 
 st.set_page_config(page_title="Collection Luxe N'Djamena", page_icon="✨", layout="wide")
 
-# ==================== CSS ====================
+# CSS
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Poppins:wght@300;400;500&display=swap');
@@ -23,11 +23,11 @@ st.markdown("""
 # Configuration
 NUMERO_WHATSAPP = "23408167043143"
 MOT_DE_PASSE_ADMIN = "Luxe2026"
-URL_PASSERELLE = "https://script.google.com/macros/s/AKfycbykGuq78OzBGqHT8C82NLehEeLtcKVkTkFhDa5l_Z8k8i0mX_EL2Fmnl57N6SLLvMRa5w/exec" # ← Mets ton URL réelle ici
+URL_PASSERELLE = "https://script.google.com/macros/s/AKfycbykGuq78OzBGqHT8C82NLehEeLtcKVkTkFhDa5l_Z8k8i0mX_EL2Fmnl57N6SLLvMRa5w/exec" # ← Remplace par ton URL réelle
 
 st.markdown('<div class="hero"><h1 class="main-title">COLLECTION LUXE<br>N\'DJAMENA</h1></div>', unsafe_allow_html=True)
 
-# Initialisation du panier
+# Panier
 if 'cart' not in st.session_state:
     st.session_state.cart = []
 
@@ -48,7 +48,7 @@ st.subheader("Notre Collection")
 
 col1, col2, col3 = st.columns([3,2,2])
 with col1: search = st.text_input("🔍 Rechercher", "")
-with col2: max_price = st.slider("Prix maximum (FCFA)", 0, 500000, 300000, 10000)
+with col2: max_price = st.slider("Prix maximum", 0, 500000, 300000, 10000)
 with col3: 
     couleurs = ["Toutes"] + sorted(df['couleurs'].dropna().astype(str).unique()) if not df.empty and 'couleurs' in df.columns else ["Toutes"]
     couleur_filter = st.selectbox("Couleur", couleurs)
@@ -76,18 +76,12 @@ if not df_filtered.empty:
             c1, c2 = st.columns([3,1])
             with c1:
                 if st.button("🛒 Ajouter au panier", key=f"add_{idx}"):
-                    # Vérifier si déjà dans le panier
                     existing = next((item for item in st.session_state.cart if item['nom'] == row['nom']), None)
                     if existing:
                         existing['quantite'] += 1
                     else:
-                        st.session_state.cart.append({
-                            "nom": row['nom'],
-                            "prix": prix,
-                            "image": row['image'],
-                            "quantite": 1
-                        })
-                    st.success(f"{row['nom']} ajouté !")
+                        st.session_state.cart.append({"nom": row['nom'], "prix": prix, "image": row['image'], "quantite": 1})
+                    st.success("Ajouté au panier !")
                     time.sleep(0.6)
                     st.rerun()
             with c2:
@@ -98,65 +92,105 @@ if not df_filtered.empty:
                     st.write(f"**Tailles :** {row.get('tailles', 'Unique')}")
                     st.write(f"**Couleurs :** {row.get('couleurs', '—')}")
                     st.write(f"**Stock :** {row.get('stock', '—')} pièces")
-else:
-    st.info("Aucun article trouvé.")
 
-# ====================== PANIER AMÉLIORÉ ======================
+# ====================== PANIER ======================
 with st.sidebar:
     st.header("🛍️ Mon Panier")
-    
     if st.session_state.cart:
-        total = 0
-        for item in st.session_state.cart:
-            total += item['prix'] * item['quantite']
-        
-        st.write(f"**{len(st.session_state.cart)} article(s)**")
-        st.write(f"**Total : {total:,} FCFA**".replace(",", " "))
+        total = sum(item['prix'] * item.get('quantite', 1) for item in st.session_state.cart)
+        st.write(f"**{len(st.session_state.cart)} article(s)** - **Total : {total:,} FCFA**".replace(",", " "))
         
         for i, item in enumerate(st.session_state.cart):
-            col_a, col_b, col_c = st.columns([4, 2, 1])
-            with col_a:
-                st.image(item['image'], width=60)
-                st.write(f"**{item['nom']}**")
-            with col_b:
-                q = st.number_input("Qté", min_value=1, value=item['quantite'], key=f"q_{i}")
-                if q != item['quantite']:
+            col1, col2, col3 = st.columns([5,2,1])
+            with col1:
+                st.write(f"{item['nom']} × {item.get('quantite', 1)}")
+            with col2:
+                q = st.number_input("Qté", min_value=1, value=item.get('quantite', 1), key=f"q{i}")
+                if q != item.get('quantite', 1):
                     item['quantite'] = q
                     st.rerun()
-            with col_c:
-                if st.button("🗑️", key=f"del_{i}"):
+            with col3:
+                if st.button("🗑️", key=f"del{i}"):
                     st.session_state.cart.pop(i)
                     st.rerun()
         
-        if st.button("Commander tout via WhatsApp", type="primary", use_container_width=True):
-            msg = "Bonjour Collection Luxe N'Djamena,\nJe souhaite commander :\n\n"
+        if st.button("Commander tout sur WhatsApp", type="primary"):
+            msg = "Bonjour, voici ma commande :\n\n"
             for item in st.session_state.cart:
-                msg += f"- {item['nom']} × {item['quantite']} = {item['prix'] * item['quantite']:,} FCFA\n".replace(",", " ")
+                msg += f"- {item['nom']} × {item.get('quantite',1)} = {item['prix']*item.get('quantite',1):,} FCFA\n".replace(",", " ")
             msg += f"\n**Total : {total:,} FCFA**".replace(",", " ")
-            wa_url = f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(msg)}"
-            st.link_button("Ouvrir WhatsApp", wa_url, use_container_width=True)
+            st.link_button("Ouvrir WhatsApp", f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(msg)}")
     else:
-        st.info("Votre panier est vide")
+        st.info("Panier vide")
 
-    # ====================== ADMIN ======================
+    # ====================== ADMIN COMPLET ======================
     st.markdown("---")
     st.header("⚙️ Administration")
     password = st.text_input("Mot de passe admin", type="password")
     
     if password == MOT_DE_PASSE_ADMIN:
         st.success("Accès autorisé")
-        st.metric("Articles publiés", len(df))
         
-        # Ajout (simplifié)
-        st.subheader("➕ Ajouter")
+        # AJOUT
+        st.subheader("➕ Ajouter un article")
         with st.form("add_form", clear_on_submit=True):
-            nom = st.text_input("Nom")
-            prix = st.number_input("Prix", min_value=0)
+            nom = st.text_input("Nom de l'article")
+            prix = st.number_input("Prix (FCFA)", min_value=0)
             uploaded = st.file_uploader("Photo", type=["jpg","png","jpeg"])
-            if st.form_submit_button("Ajouter"):
+            tailles = st.text_input("Tailles disponibles", "Unique")
+            couleurs = st.text_input("Couleurs disponibles", "Unique")
+            stock = st.number_input("Quantité en stock", min_value=1, value=1)
+            
+            if st.form_submit_button("Ajouter au catalogue"):
                 if nom and uploaded:
-                    st.info("Ajout en cours (connecté au script)")
-                    # Code d'ajout ici (comme avant)
+                    with st.spinner("Ajout en cours..."):
+                        try:
+                            b64 = base64.b64encode(uploaded.read()).decode()
+                            res_img = requests.post("https://api.imgbb.com/1/upload", 
+                                                  data={"key": st.secrets.get("IMGBB_API_KEY", "70be83b276ba6ccbf03b71597dfc2a5d"), "image": b64})
+                            img_url = res_img.json()["data"]["url"]
+                            
+                            payload = {
+                                "action": "ajout_article",
+                                "nom": nom,
+                                "prix": prix,
+                                "image": img_url,
+                                "tailles": tailles,
+                                "couleurs": couleurs,
+                                "stock": stock
+                            }
+                            r = requests.post(URL_PASSERELLE, json=payload, timeout=15)
+                            if r.status_code == 200:
+                                st.success("✅ Article ajouté avec succès !")
+                                time.sleep(1.5)
+                                st.rerun()
+                            else:
+                                st.error("Erreur lors de l'ajout")
+                        except Exception as e:
+                            st.error(f"Erreur : {e}")
+        
+        # LISTE + MODIFICATION + SUPPRESSION
+        st.subheader("📋 Articles existants")
+        if not df_admin.empty:
+            st.dataframe(df_admin[['nom', 'prix', 'tailles', 'couleurs', 'stock']], use_container_width=True)
+            
+            article = st.selectbox("Sélectionner un article", df_admin['nom'].dropna().astype(str).unique())
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🗑️ Supprimer", type="primary"):
+                    try:
+                        r = requests.post(URL_PASSERELLE, json={"action": "suppression_article", "nom": article})
+                        st.success("Article supprimé !")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(e)
+            with col2:
+                st.info("Modification complète disponible dans la prochaine version")
+        else:
+            st.info("Aucun article pour le moment")
+            
     elif password:
         st.error("Mot de passe incorrect")
 
