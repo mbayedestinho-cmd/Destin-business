@@ -88,6 +88,10 @@ with st.sidebar:
         st.success("Accès autorisé 🔓")
         st.write("---")
         
+        # CONTENEURS POUR ÉVITER LE MÉLANGE DES MESSAGES D'ALERTE
+        message_ajout_container = st.container()
+        message_suppr_container = st.container()
+        
         # SECTION FORMULAIRE D'AJOUT
         st.markdown("### ➕ Ajouter un nouvel article")
         with st.form("form_ajout", clear_on_submit=True):
@@ -115,6 +119,7 @@ with st.sidebar:
                             if "data" in res_json:
                                 img_url = res_json["data"]["url"]
                                 payload = {
+                                    "action": "ajout_article", # Spécification explicite de l'action
                                     "nom": nom.strip(),
                                     "prix": prix,
                                     "image": img_url,
@@ -125,22 +130,22 @@ with st.sidebar:
                                 res = requests.post(URL_PASSERELLE, json=payload, timeout=10)
                                 
                                 if res.status_code == 200:
-                                    st.success("🎉 Pièce ajoutée au catalogue Sheets !")
-                                    time.sleep(1)
+                                    message_ajout_container.success("🎉 Pièce ajoutée au catalogue Sheets !")
+                                    time.sleep(1.5)
                                     st.rerun()
                                 else:
-                                    st.error("Échec de synchronisation avec Google Sheets.")
+                                    message_ajout_container.error("Échec de synchronisation avec Google Sheets.")
                             else:
                                 error_msg = res_json.get("error", {}).get("message", "Clé invalide ou expirée.")
-                                st.error(f"Hébergeur d'images (ImgBB) a refusé le fichier. Détail : {error_msg}")
+                                message_ajout_container.error(f"Erreur ImgBB : {error_msg}")
                         except Exception as e:
-                            st.error(f"Erreur technique : {e}")
+                            message_ajout_container.error(f"Erreur technique : {e}")
                 else:
-                    st.warning("Informations manquantes pour la création de la pièce.")
+                    message_ajout_container.warning("Informations manquantes.")
                             
         st.markdown("---")
         
-        # SECTION FORMULAIRE DE SUPPRESSION (CORRIGÉE)
+        # SECTION SUPPRESSION
         st.markdown("### 🗑️ Supprimer un article")
         if not df_admin.empty and 'nom' in df_admin.columns:
             liste_articles = [str(n).strip() for n in df_admin['nom'].dropna().unique() if str(n).strip() != ""]
@@ -148,12 +153,11 @@ with st.sidebar:
             if liste_articles:
                 article_a_supprimer = st.selectbox("Sélectionnez l'article à retirer :", liste_articles)
                 
-                # Correction ici : Déclenchement uniquement sur clic réel du bouton
                 if st.button("🔴 Supprimer définitivement", key="btn_supprimer_unique"):
                     with st.spinner("Retrait des serveurs..."):
                         try:
                             payload_suppression = {
-                                "action": "suppression_article",
+                                "action": "suppression_article", # Spécification explicite de l'action
                                 "nom": str(article_a_supprimer).strip()
                             }
                             response = requests.post(URL_PASSERELLE, json=payload_suppression, timeout=10)
@@ -161,15 +165,15 @@ with st.sidebar:
                             if response.status_code == 200:
                                 res_json = response.json()
                                 if res_json.get("status") == "success":
-                                    st.success(f"✅ {res_json.get('message')}")
-                                    time.sleep(1)
+                                    message_suppr_container.success(f"✅ {res_json.get('message')}")
+                                    time.sleep(1.5)
                                     st.rerun()
                                 else:
-                                    st.error(f"Google Apps Script a refusé : {res_json.get('message')}")
+                                    message_suppr_container.error(f"Erreur Google Sheets : {res_json.get('message')}")
                             else:
-                                st.error(f"Erreur de connexion réseau (Code {response.status_code})")
+                                message_suppr_container.error(f"Erreur réseau (Code {response.status_code})")
                         except Exception as e:
-                            st.error(f"Erreur : {e}")
+                            message_suppr_container.error(f"Erreur : {e}")
             else:
                 st.info("Aucune donnée disponible à effacer.")
                 
