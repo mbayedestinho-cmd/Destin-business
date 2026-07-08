@@ -122,7 +122,6 @@ if not df.empty:
                 </div>
             """, unsafe_allow_html=True)
             
-            # Bouton natif pour éviter les blocages de fenêtres pop-up
             st.link_button("💬 Commander sur WhatsApp", url=url_whatsapp, use_container_width=True)
             st.markdown("<br>", unsafe_allow_html=True)
 else:
@@ -156,12 +155,20 @@ with st.sidebar:
                             img_bytes = uploaded_file.read()
                             base64_image = base64.b64encode(img_bytes).decode('utf-8')
                            
+                            # Récupération sécurisée de la clé ImgBB
                             api_key = st.secrets.get("IMGBB_API_KEY", "70be83b276ba6ccbf03b71597dfc2a5d")
                             res_img = requests.post(
                                 "https://api.imgbb.com/1/upload",
                                 data={"key": api_key, "image": base64_image}
                             )
-                            img_url = res_img.json()["data"]["url"]
+                            res_json = res_img.json()
+                            
+                            # Vérification de la validité de la réponse ImgBB
+                            if "data" in res_json:
+                                img_url = res_json["data"]["url"]
+                            else:
+                                raison_refus = res_json.get("error", {}).get("message", "Raison inconnue")
+                                raise Exception(f"Hébergeur d'images (ImgBB) a refusé le fichier. Détail : {raison_refus}")
                            
                             payload = {
                                 "nom": nom,
@@ -183,7 +190,7 @@ with st.sidebar:
                 else:
                     st.warning("Veuillez remplir les champs obligatoires (Nom, Prix, Photo).")
                             
-        # 🗑️ SECTION CORBEILLE / RETRAIT D'ARTICLE
+        # 🗑️ SECTION RETRAIT D'ARTICLE
         st.markdown("---")
         st.markdown("### 🗑️ Retirer un article du catalogue")
        
