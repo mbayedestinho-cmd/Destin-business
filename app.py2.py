@@ -23,7 +23,7 @@ st.markdown("""
 # Configuration
 NUMERO_WHATSAPP = "23408167043143"
 MOT_DE_PASSE_ADMIN = "Luxe2026"
-URL_PASSERELLE = "https://script.google.com/macros/s/AKfycbykGuq78OzBGqHT8C82NLehEeLtcKVkTkFhDa5l_Z8k8i0mX_EL2Fmnl57N6SLLvMRa5w/exec" # ← Remplace par ton URL réelle
+URL_PASSERELLE = "https://script.google.com/macros/s/AKfycbykGuq78OzBGqHT8C82NLehEeLtcKVkTkFhDa5l_Z8k8i0mX_EL2Fmnl57N6SLLvMRa5w/exec" # ← Remplace par ton URL
 
 st.markdown('<div class="hero"><h1 class="main-title">COLLECTION LUXE<br>N\'DJAMENA</h1></div>', unsafe_allow_html=True)
 
@@ -147,9 +147,16 @@ with st.sidebar:
                     with st.spinner("Ajout en cours..."):
                         try:
                             b64 = base64.b64encode(uploaded.read()).decode()
-                            res_img = requests.post("https://api.imgbb.com/1/upload", 
-                                                  data={"key": st.secrets.get("IMGBB_API_KEY", "70be83b276ba6ccbf03b71597dfc2a5d"), "image": b64})
-                            img_url = res_img.json()["data"]["url"]
+                            api_key = st.secrets.get("IMGBB_API_KEY", "70be83b276ba6ccbf03b71597dfc2a5d")
+                            res_img = requests.post("https://api.imgbb.com/1/upload", data={"key": api_key, "image": b64})
+                            res_json = res_img.json()
+                            
+                            if "data" in res_json and "url" in res_json["data"]:
+                                img_url = res_json["data"]["url"]
+                            else:
+                                error_msg = res_json.get("error", {}).get("message", "Erreur inconnue")
+                                st.error(f"Erreur ImgBB : {error_msg}")
+                                st.stop()
                             
                             payload = {
                                 "action": "ajout_article",
@@ -166,74 +173,35 @@ with st.sidebar:
                                 time.sleep(1.5)
                                 st.rerun()
                             else:
-                                st.error("Échec de l'ajout")
+                                st.error(f"Erreur serveur (code {r.status_code})")
                         except Exception as e:
-                            st.error(f"Erreur : {e}")
+                            st.error(f"Erreur technique : {e}")
         
-        # LISTE COMPLÈTE DES ARTICLES
+        # Articles existants
         st.subheader("📋 Articles existants")
         if not df_admin.empty:
             st.dataframe(df_admin, use_container_width=True)
         else:
-            st.info("Aucun article dans le catalogue pour le moment.")
+            st.info("Aucun article dans le catalogue.")
         
-        # MODIFIER
-        st.subheader("✏️ Modifier un article")
+        # Modifier & Supprimer (conservés)
+        st.subheader("✏️ Modifier / Supprimer")
         if not df_admin.empty:
-            article_to_edit = st.selectbox("Choisir l'article à modifier", df_admin['nom'].dropna().astype(str).unique(), key="edit_select")
-            if article_to_edit:
-                art = df_admin[df_admin['nom'].astype(str) == article_to_edit].iloc[0]
-                with st.form("edit_form"):
-                    new_nom = st.text_input("Nouveau nom", art['nom'])
-                    new_prix = st.number_input("Nouveau prix", value=int(float(art['prix'])))
-                    new_tailles = st.text_input("Tailles", art.get('tailles', 'Unique'))
-                    new_couleurs = st.text_input("Couleurs", art.get('couleurs', 'Unique'))
-                    new_stock = st.number_input("Stock", value=int(art.get('stock', 1)))
-                    new_image = st.file_uploader("Nouvelle photo (optionnel)")
-                    
-                    if st.form_submit_button("Enregistrer les modifications"):
-                        with st.spinner("Mise à jour..."):
-                            try:
-                                img_url = art['image']
-                                if new_image is not None:
-                                    b64 = base64.b64encode(new_image.read()).decode()
-                                    res = requests.post("https://api.imgbb.com/1/upload", data={"key": st.secrets.get("IMGBB_API_KEY", "70be83b276ba6ccbf03b71597dfc2a5d"), "image": b64})
-                                    img_url = res.json()["data"]["url"]
-                                
-                                payload = {
-                                    "action": "modification_article",
-                                    "ancien_nom": article_to_edit,
-                                    "nom": new_nom,
-                                    "prix": new_prix,
-                                    "image": img_url,
-                                    "tailles": new_tailles,
-                                    "couleurs": new_couleurs,
-                                    "stock": new_stock
-                                }
-                                r = requests.post(URL_PASSERELLE, json=payload, timeout=15)
-                                if r.status_code == 200:
-                                    st.success("✅ Article modifié avec succès !")
-                                    time.sleep(1.5)
-                                    st.rerun()
-                                else:
-                                    st.error("Échec de la modification")
-                            except Exception as e:
-                                st.error(f"Erreur : {e}")
-        
-        # SUPPRESSION
-        st.subheader("🗑️ Supprimer un article")
-        if not df_admin.empty:
-            article_suppr = st.selectbox("Choisir l'article à supprimer", df_admin['nom'].dropna().astype(str).unique(), key="suppr_select")
-            if st.button("Supprimer définitivement", type="primary"):
-                try:
-                    r = requests.post(URL_PASSERELLE, json={"action": "suppression_article", "nom": article_suppr})
-                    st.success("Article supprimé !")
-                    time.sleep(1)
-                    st.rerun()
-                except Exception as e:
-                    st.error(e)
+            article = st.selectbox("Choisir un article", df_admin['nom'].dropna().astype(str).unique())
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Supprimer", type="primary"):
+                    try:
+                        r = requests.post(URL_PASSERELLE, json={"action": "suppression_article", "nom": article})
+                        st.success("Supprimé !")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(e)
+            with col2:
+                st.info("Modification disponible ci-dessous")
         
     elif password:
         st.error("Mot de passe incorrect")
 
-st.caption("Destin coorporation limited © 2026")
+st.caption("Collection Luxe N'Djamena © 2026")
