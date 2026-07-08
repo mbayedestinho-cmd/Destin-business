@@ -88,14 +88,13 @@ with st.sidebar:
         st.success("Accès autorisé 🔓")
         st.write("---")
         
-        # SÉCTION FORMULAIRE D'AJOUT
+        # SECTION FORMULAIRE D'AJOUT
         st.markdown("### ➕ Ajouter un nouvel article")
         with st.form("form_ajout", clear_on_submit=True):
             nom = st.text_input("Nom du vêtement / de la pièce :")
             prix = st.number_input("Prix de vente en boutique (FCFA) :", min_value=0, step=5000)
             uploaded_file = st.file_uploader("Photo du vêtement (JPG/PNG) :", type=["png", "jpg", "jpeg"])
             
-            # Vos extensions ajoutées sur l'interface graphique
             tailles_input = st.text_input("Tailles disponibles :", value="Unique")
             couleurs_input = st.text_input("Couleurs disponibles :", value="Unique")
             stock_input = st.number_input("Quantité en stock :", min_value=1, value=1)
@@ -141,7 +140,7 @@ with st.sidebar:
                             
         st.markdown("---")
         
-        # SÉCTION FORMULAIRE DE SUPPRESSION
+        # SECTION FORMULAIRE DE SUPPRESSION (CORRIGÉE)
         st.markdown("### 🗑️ Supprimer un article")
         if not df_admin.empty and 'nom' in df_admin.columns:
             liste_articles = [str(n).strip() for n in df_admin['nom'].dropna().unique() if str(n).strip() != ""]
@@ -149,7 +148,8 @@ with st.sidebar:
             if liste_articles:
                 article_a_supprimer = st.selectbox("Sélectionnez l'article à retirer :", liste_articles)
                 
-                if st.form_submit_button or st.button("🔴 Supprimer définitivement"):
+                # Correction ici : Déclenchement uniquement sur clic réel du bouton
+                if st.button("🔴 Supprimer définitivement", key="btn_supprimer_unique"):
                     with st.spinner("Retrait des serveurs..."):
                         try:
                             payload_suppression = {
