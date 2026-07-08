@@ -132,7 +132,7 @@ with st.sidebar:
     if password == MOT_DE_PASSE_ADMIN:
         st.success("Accès autorisé")
         
-        # === AJOUT ===
+        # AJOUT
         st.subheader("➕ Ajouter un article")
         with st.form("add_form", clear_on_submit=True):
             nom = st.text_input("Nom de l'article")
@@ -170,11 +170,17 @@ with st.sidebar:
                         except Exception as e:
                             st.error(f"Erreur : {e}")
         
-        # === MODIFIER ===
+        # LISTE COMPLÈTE DES ARTICLES
+        st.subheader("📋 Articles existants")
+        if not df_admin.empty:
+            st.dataframe(df_admin, use_container_width=True)
+        else:
+            st.info("Aucun article dans le catalogue pour le moment.")
+        
+        # MODIFIER
         st.subheader("✏️ Modifier un article")
         if not df_admin.empty:
             article_to_edit = st.selectbox("Choisir l'article à modifier", df_admin['nom'].dropna().astype(str).unique(), key="edit_select")
-            
             if article_to_edit:
                 art = df_admin[df_admin['nom'].astype(str) == article_to_edit].iloc[0]
                 with st.form("edit_form"):
@@ -183,7 +189,7 @@ with st.sidebar:
                     new_tailles = st.text_input("Tailles", art.get('tailles', 'Unique'))
                     new_couleurs = st.text_input("Couleurs", art.get('couleurs', 'Unique'))
                     new_stock = st.number_input("Stock", value=int(art.get('stock', 1)))
-                    new_image = st.file_uploader("Nouvelle photo (laisser vide pour conserver l'ancienne)")
+                    new_image = st.file_uploader("Nouvelle photo (optionnel)")
                     
                     if st.form_submit_button("Enregistrer les modifications"):
                         with st.spinner("Mise à jour..."):
@@ -214,7 +220,7 @@ with st.sidebar:
                             except Exception as e:
                                 st.error(f"Erreur : {e}")
         
-        # === SUPPRESSION ===
+        # SUPPRESSION
         st.subheader("🗑️ Supprimer un article")
         if not df_admin.empty:
             article_suppr = st.selectbox("Choisir l'article à supprimer", df_admin['nom'].dropna().astype(str).unique(), key="suppr_select")
