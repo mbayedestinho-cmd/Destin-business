@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import urllib.parse
 import base64
+import time # <--- NOUVEAU : Essentiel pour casser le cache en temps réel
 
 # 1. Configuration de la page
 st.set_page_config(
@@ -12,12 +13,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- CONFIGURATIONS ---
-NUMERO_WHATSAPP = "23408167043143"  
-MOT_DE_PASSE_ADMIN = "Luxe2026"   
-URL_PASSERELLE = "https://script.google.com/macros/s/AKfycbwAtKtO_g5HWgeUe0XwSnWLgJuMMLrz6BXfmTDF5iQEVW8qjrZDos67S7VW8RBH-oco/exec" 
-
-# 2. Design Haute Couture
+# --- DESIGN HAUTE COUTURE ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Poppins:wght@300;400;500&display=swap');
@@ -85,28 +81,38 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- EN-TÊTE BIENVENUE ---
+# --- CONFIGURATIONS ---
+NUMERO_WHATSAPP = "23408167043143"  
+MOT_DE_PASSE_ADMIN = "Luxe2026"   
+URL_PASSERELLE = "https://script.google.com/macros/s/AKfycbwAtKtO_g5HWgeUe0XwSnWLgJuMMLrz6BXfmTDF5iQEVW8qjrZDos67S7VW8RBH-oco/exec" 
+
 st.markdown('<h1 class="main-title">COLLECTION<br>LUXE<br>N\'DJAMENA</h1>', unsafe_allow_html=True)
 st.markdown('<div class="stars-icon">✨</div>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">L\'élégance et la haute couture à votre portée</p>', unsafe_allow_html=True)
 
-# --- CONNEXION À GOOGLE SHEETS ---
+# --- CHARGEMENT DU CATALOGUE (CORRIGÉ AVEC LE SYSTÈME ANTI-CACHE) ---
 try:
     id_sheet = st.secrets["ID_DU_SHEET"]
-    url_csv = f"https://docs.google.com/spreadsheets/d/{id_sheet}/gviz/tq?tqx=out:csv"
-    df = pd.read_csv(url_csv)
-    df.columns = [col.lower().strip() for col in df.columns]
+    # On injecte l'heure précise en secondes (&cache_buster=...) pour forcer Google à donner les vraies lignes actualisées
+    url_csv = f"https://docs.google.com/spreadsheets/d/{id_sheet}/gviz/tq?tqx=out:csv&cache_buster={int(time.time())}"
+    df_raw = pd.read_csv(url_csv)
+    df_raw.columns = [col.lower().strip() for col in df_raw.columns]
     
-    # 🧹 Nettoyage de sécurité : Supprime les lignes vides/incomplètes du catalogue pour éviter le bug "nan"
-    df = df.dropna(subset=['nom', 'prix', 'image'])
+    # Vitrine client : n'affiche que les lignes complètes et valides
+    df_vitrine = df_raw.dropna(subset=['nom', 'prix', 'image'])
+    df_vitrine = df_vitrine[df_vitrine['prix'].astype(str).str.lower() != 'nan']
+    
+    # Version Admin : affiche absolument tout ce qui possède un nom pour pouvoir nettoyer
+    df_admin = df_raw.dropna(subset=['nom'])
 except Exception as e:
     st.error(f"⚠️ Erreur d'accès au catalogue : {e}")
-    df = pd.DataFrame(columns=["nom", "prix", "image"])
+    df_vitrine = pd.DataFrame(columns=["nom", "prix", "image"])
+    df_admin = pd.DataFrame(columns=["nom"])
 
 # --- AFFICHAGE DE LA VITRINE ---
-if not df.empty:
+if not df_vitrine.empty:
     cols = st.columns(3)
-    for index, row in df.reset_index().iterrows():
+    for index, row in df_vitrine.reset_index().iterrows():
         with cols[index % 3]:
             try:
                 prix_formate = int(float(row['prix']))
@@ -128,9 +134,9 @@ if not df.empty:
             st.link_button("💬 Commander sur WhatsApp", url=url_whatsapp, use_container_width=True)
             st.markdown("<br>", unsafe_allow_html=True)
 else:
-    st.info("Le catalogue est en cours de mise à jour. Revenez dans un instant !")
+    st.info("Le catalogue est vide ou en cours de mise à jour.")
 
-# --- PANNEAU ADMINISTRATION SÉCURISÉ ---
+# --- COMPARTIMENT ADMINISTRATEUR ---
 with st.sidebar:
     st.markdown("### ⚙️ Authentification Admin")
     password_input = st.text_input("Entrez le mot de passe de la boutique", type="password")
@@ -139,25 +145,25 @@ with st.sidebar:
         st.success("Accès autorisé 🔓")
         st.write("---")
         
-        # ➕ FORMULAIRE D'AJOUT D'ARTICLE
         st.markdown("### ➕ Ajouter un nouvel article")
         with st.form("form_ajout", clear_on_submit=True):
             nom = st.text_input("Nom du vêtement / de la pièce :")
-            prix = st.number_input("Prix de vente en boutique (FCFA) :", min_value=0, step=5000)
+            prix = st.number_input("Prix de vente (FCFA) :", min_value=0, step=5000)
             uploaded_file = st.file_uploader("Photo du vêtement (JPG/PNG) :", type=["png", "jpg", "jpeg"])
-            tailles_input = st.text_input("Tailles disponibles (ex: M, L, XL) :", value="Unique")
-            couleurs_input = st.text_input("Couleurs disponibles (ex: Noir, Blanc) :", value="Unique")
-            stock_input = st.number_input("Quantité en stock :", min_value=1, value=1)
+            tailles_input = st.text_input("Tailles (ex: M, L, XL) :", value="Unique")
+            couleurs_input = st.text_input("Couleurs (ex: Noir) :", value="Unique")
+            stock_input = st.number_input("Stock :", min_value=1, value=1)
             
             bouton_ajout = st.form_submit_button("🚀 Mettre en vente immédiatement")
             
             if bouton_ajout:
                 if nom and prix and uploaded_file:
-                    with st.spinner("Téléversement de l'image et publication..."):
+                    with st.spinner("Téléversement et enregistrement en cours..."):
                         try:
                             img_bytes = uploaded_file.read()
                             base64_image = base64.b64encode(img_bytes).decode('utf-8')
                            
+                            # Clé API ImgBB mise à jour
                             api_key = "C0e31ddc27c82849461799d031c85ba6"
                             
                             res_img = requests.post(
@@ -168,39 +174,37 @@ with st.sidebar:
                             
                             if "data" in res_json:
                                 img_url = res_json["data"]["url"]
-                            else:
-                                raison_refus = res_json.get("error", {}).get("message", "Raison inconnue")
-                                raise Exception(f"Hébergeur d'images (ImgBB) a refusé le fichier. Détail : {raison_refus}")
-                           
-                            payload = {
-                                "nom": nom,
-                                "prix": prix,
-                                "image": img_url,
-                                "tailles": tailles_input,
-                                "couleurs": couleurs_input,
-                                "stock": stock_input
-                            }
-                           
-                            res = requests.post(URL_PASSERELLE, json=payload, timeout=10)
-                            if res.status_code == 200:
-                                st.success("🎉 Article mis en ligne !")
-                                try:
+                                
+                                payload = {
+                                    "nom": nom.strip(),
+                                    "prix": prix,
+                                    "image": img_url,
+                                    "tailles": tailles_input,
+                                    "couleurs": couleurs_input,
+                                    "stock": stock_input
+                                }
+                               
+                                res = requests.post(URL_PASSERELLE, json=payload, timeout=10)
+                                if res.status_code == 200:
+                                    st.success("🎉 Article mis en ligne avec succès !")
+                                    time.sleep(1)
                                     st.rerun()
-                                except AttributeError:
-                                    st.experimental_rerun()
+                                else:
+                                    st.error("Erreur lors de l'enregistrement dans le catalogue Sheets.")
                             else:
-                                st.error("Erreur d'enregistrement dans Google Sheets.")
+                                msg_erreur = res_json.get("error", {}).get("message", "Erreur inconnue")
+                                st.error(f"⚠️ Hébergeur refusé : {msg_erreur}")
+                                
                         except Exception as e:
                             st.error(f"⚠️ Échec de l'opération : {e}")
                 else:
                     st.warning("Veuillez remplir les champs obligatoires (Nom, Prix, Photo).")
                             
-        # 🗑️ SECTION RETRAIT D'ARTICLE SÉCURISÉE
         st.markdown("---")
         st.markdown("### 🗑️ Retirer un article du catalogue")
        
-        if not df.empty and 'nom' in df.columns:
-            liste_articles = df['nom'].unique().tolist()
+        if not df_admin.empty:
+            liste_articles = [str(n).strip() for n in df_admin['nom'].unique().tolist() if pd.notna(n)]
             article_a_supprimer = st.selectbox("Sélectionnez l'article à retirer :", liste_articles)
            
             if st.button("🔴 Supprimer définitivement"):
@@ -208,22 +212,22 @@ with st.sidebar:
                     try:
                         payload_suppression = {
                             "action": "suppression_article",
-                            "nom": str(article_a_supprimer)
+                            "nom": str(article_a_supprimer).strip()
                         }
                         response = requests.post(URL_PASSERELLE, json=payload_suppression, timeout=10)
+                        res_json = response.json()
                        
-                        if response.status_code == 200:
-                            st.success(f"'{article_a_supprimer}' a bien été retiré.")
-                            try:
-                                st.rerun()
-                            except AttributeError:
-                                st.experimental_rerun()
+                        # Vérification stricte de la réponse de succès envoyée par Apps Script
+                        if response.status_code == 200 and res_json.get("status") == "success":
+                            st.success(f"🎉 '{article_a_supprimer}' supprimé avec succès !")
+                            time.sleep(1)
+                            st.rerun()
                         else:
-                            st.error(f"Erreur de passerelle Google (Code: {response.status_code}).")
+                            st.error(f"Erreur : {res_json.get('message', 'Impossible d’effacer la ligne.')}")
                     except Exception as e:
                         st.error(f"⚠️ Impossible de valider la suppression : {e}")
         else:
-            st.info("Aucun article disponible pour suppression.")
+            st.info("Aucun article trouvé dans le catalogue.")
                         
     elif password_input != "":
         st.error("Mot de passe incorrect ❌")
