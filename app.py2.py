@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Style CSS épuré haute couture
+# Style CSS
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Poppins:wght@300;400;500&display=swap');
@@ -44,9 +44,9 @@ try:
     df_raw = pd.read_csv(url_csv)
     df_raw.columns = [col.lower().strip() for col in df_raw.columns]
    
-    # Sécurité anti-lignes vides ou corrompues (évite les bugs 'nan')
     df_vitrine = df_raw.dropna(subset=['nom', 'prix', 'image'])
-    df_vitrine = df_vitrine[(df_vitrine['nom'].astype(str).str.strip() != "") & (df_vitrine['prix'].astype(str).str.lower() != 'nan')]
+    df_vitrine = df_vitrine[(df_vitrine['nom'].astype(str).str.strip() != "") & 
+                           (df_vitrine['prix'].astype(str).str.lower() != 'nan')]
     df_admin = df_raw.copy()
 except Exception as e:
     st.error(f"⚠️ Liaison Google Sheets interrompue : {e}")
@@ -79,7 +79,7 @@ if not df_vitrine.empty:
 else:
     st.info("Aucune pièce disponible dans la vitrine actuellement.")
 
-# --- ESPACE DE GESTION (PANNEAU SIDEBAR) ---
+# --- ESPACE DE GESTION (SIDEBAR) ---
 with st.sidebar:
     st.markdown("### ⚙️ Direction de la Boutique")
     password_input = st.text_input("Clé d'accès admin", type="password")
@@ -88,94 +88,166 @@ with st.sidebar:
         st.success("Accès autorisé 🔓")
         st.write("---")
        
-        # CONTENEURS POUR ÉVITER LE MÉLANGE DES MESSAGES D'ALERTE
         message_ajout_container = st.container()
+        message_edit_container = st.container()
         message_suppr_container = st.container()
        
-        # SECTION FORMULAIRE D'AJOUT
+        # ====================== AJOUT ======================
         st.markdown("### ➕ Ajouter un nouvel article")
         with st.form("form_ajout", clear_on_submit=True):
             nom = st.text_input("Nom du vêtement / de la pièce :")
-            prix = st.number_input("Prix de vente en boutique (FCFA) :", min_value=0, step=5000)
-            uploaded_file = st.file_uploader("Photo du vêtement (JPG/PNG) :", type=["png", "jpg", "jpeg"])
+            prix = st.number_input("Prix de vente (FCFA) :", min_value=0, step=5000)
+            uploaded_file = st.file_uploader("Photo du vêtement :", type=["png", "jpg", "jpeg"])
+            tailles = st.text_input("Tailles disponibles :", value="Unique")
+            couleurs = st.text_input("Couleurs disponibles :", value="Unique")
+            stock = st.number_input("Quantité en stock :", min_value=1, value=1)
            
-            tailles_input = st.text_input("Tailles disponibles :", value="Unique")
-            couleurs_input = st.text_input("Couleurs disponibles :", value="Unique")
-            stock_input = st.number_input("Quantité en stock :", min_value=1, value=1)
-           
-            bouton_ajout = st.form_submit_button("🚀 Mettre en vente immédiatement")
-           
-            if bouton_ajout:
+            if st.form_submit_button("🚀 Mettre en vente immédiatement"):
                 if nom and prix and uploaded_file:
-                    with st.spinner("Téléversement et enregistrement en cours..."):
+                    with st.spinner("Enregistrement en cours..."):
                         try:
                             img_bytes = uploaded_file.read()
                             base64_image = base64.b64encode(img_bytes).decode('utf-8')
-                           
                             api_key = st.secrets.get("IMGBB_API_KEY", "70be83b276ba6ccbf03b71597dfc2a5d")
-                            res_img = requests.post("https://api.imgbb.com/1/upload", data={"key": api_key, "image": base64_image})
+                            
+                            res_img = requests.post("https://api.imgbb.com/1/upload", 
+                                                  data={"key": api_key, "image": base64_image})
                             res_json = res_img.json()
-                           
+                            
                             if "data" in res_json:
                                 img_url = res_json["data"]["url"]
                                 payload = {
-                                    "action": "ajout_article", # Spécification explicite de l'action
+                                    "action": "ajout_article",
                                     "nom": nom.strip(),
                                     "prix": prix,
                                     "image": img_url,
-                                    "tailles": tailles_input.strip(),
-                                    "couleurs": couleurs_input.strip(),
-                                    "stock": stock_input
+                                    "tailles": tailles.strip(),
+                                    "couleurs": couleurs.strip(),
+                                    "stock": stock
                                 }
-                                res = requests.post(URL_PASSERELLE, json=payload, timeout=10)
-                               
+                                res = requests.post(URL_PASSERELLE, json=payload, timeout=15)
                                 if res.status_code == 200:
-                                    message_ajout_container.success("🎉 Pièce ajoutée au catalogue Sheets !")
+                                    message_ajout_container.success("🎉 Article ajouté avec succès !")
                                     time.sleep(1.5)
                                     st.rerun()
                                 else:
-                                    message_ajout_container.error("Échec de synchronisation avec Google Sheets.")
+                                    message_ajout_container.error("Échec de synchronisation.")
                             else:
-                                error_msg = res_json.get("error", {}).get("message", "Clé invalide ou expirée.")
-                                message_ajout_container.error(f"Erreur ImgBB : {error_msg}")
+                                message_ajout_container.error("Erreur lors de l'upload de l'image.")
                         except Exception as e:
-                            message_ajout_container.error(f"Erreur technique : {e}")
+                            message_ajout_container.error(f"Erreur : {e}")
                 else:
-                    message_ajout_container.warning("Informations manquantes.")
-                           
+                    message_ajout_container.warning("Nom, prix et photo sont obligatoires.")
+        
         st.markdown("---")
-       
-        # SECTION SUPPRESSION
+
+        # ====================== MODIFIER ======================
+        st.markdown("### ✏️ Modifier un article")
+        if not df_admin.empty and 'nom' in df_admin.columns:
+            liste_articles = [str(n).strip() for n in df_admin['nom'].dropna().unique() if str(n).strip() != ""]
+            
+            article_to_edit = st.selectbox("Sélectionnez l'article à modifier :", liste_articles, key="edit_select")
+            
+            # Charger les données actuelles
+            article_data = df_admin[df_admin['nom'].astype(str).str.strip() == article_to_edit].iloc[0]
+            
+            with st.form("form_edit", clear_on_submit=True):
+                new_nom = st.text_input("Nouveau nom :", value=article_data['nom'])
+                new_prix = st.number_input("Nouveau prix (FCFA) :", min_value=0, step=5000, value=int(float(article_data['prix'])))
+                new_tailles = st.text_input("Tailles :", value=article_data.get('tailles', 'Unique'))
+                new_couleurs = st.text_input("Couleurs :", value=article_data.get('couleurs', 'Unique'))
+                new_stock = st.number_input("Stock :", min_value=0, value=int(article_data.get('stock', 1)))
+                
+                st.markdown("**Image actuelle :**")
+                st.image(article_data['image'], width=300)
+                
+                new_image = st.file_uploader("Nouvelle photo (laisser vide pour conserver l'ancienne) :", 
+                                           type=["png", "jpg", "jpeg"], key="edit_image")
+                
+                if st.form_submit_button("💾 Enregistrer les modifications"):
+                    with st.spinner("Mise à jour en cours..."):
+                        try:
+                            img_url = article_data['image'] # Par défaut, garder l'ancienne
+                            
+                            if new_image is not None:
+                                img_bytes = new_image.read()
+                                base64_image = base64.b64encode(img_bytes).decode('utf-8')
+                                api_key = st.secrets.get("IMGBB_API_KEY", "70be83b276ba6ccbf03b71597dfc2a5d")
+                                res_img = requests.post("https://api.imgbb.com/1/upload", 
+                                                      data={"key": api_key, "image": base64_image})
+                                if "data" in res_img.json():
+                                    img_url = res_img.json()["data"]["url"]
+                            
+                            payload = {
+                                "action": "modification_article",
+                                "ancien_nom": str(article_to_edit).strip(),
+                                "nom": new_nom.strip(),
+                                "prix": new_prix,
+                                "image": img_url,
+                                "tailles": new_tailles.strip(),
+                                "couleurs": new_couleurs.strip(),
+                                "stock": new_stock
+                            }
+                            
+                            res = requests.post(URL_PASSERELLE, json=payload, timeout=15)
+                            if res.status_code == 200:
+                                message_edit_container.success("✅ Article modifié avec succès !")
+                                time.sleep(1.5)
+                                st.rerun()
+                            else:
+                                message_edit_container.error("Échec de la mise à jour.")
+                        except Exception as e:
+                            message_edit_container.error(f"Erreur : {e}")
+        
+        st.markdown("---")
+
+        # ====================== LISTE COMPLÈTE ======================
+        st.markdown("### 📋 Liste complète des articles")
+        if not df_admin.empty:
+            display_cols = ['nom', 'prix', 'tailles', 'couleurs', 'stock', 'image']
+            cols_to_show = [col for col in display_cols if col in df_admin.columns]
+            
+            df_display = df_admin[cols_to_show].copy()
+            if 'prix' in df_display.columns:
+                df_display['prix'] = df_display['prix'].apply(
+                    lambda x: f"{int(float(x)):,} FCFA".replace(",", " ") if pd.notna(x) else x
+                )
+            
+            st.dataframe(df_display, use_container_width=True, hide_index=True,
+                        column_config={"image": st.column_config.ImageColumn("Photo", width="small")})
+            
+            csv = df_admin.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Télécharger le catalogue (CSV)", csv, "catalogue_luxe_ndjamena.csv", "text/csv")
+        else:
+            st.info("Aucun article disponible.")
+        
+        st.markdown("---")
+
+        # ====================== SUPPRESSION ======================
         st.markdown("### 🗑️ Supprimer un article")
         if not df_admin.empty and 'nom' in df_admin.columns:
             liste_articles = [str(n).strip() for n in df_admin['nom'].dropna().unique() if str(n).strip() != ""]
-           
+            
             if liste_articles:
-                article_a_supprimer = st.selectbox("Sélectionnez l'article à retirer :", liste_articles)
-               
-                if st.button("🔴 Supprimer définitivement", key="btn_supprimer_unique"):
-                    with st.spinner("Retrait des serveurs..."):
-                        try:
-                            payload_suppression = {
-                                "action": "suppression_article", # Spécification explicite de l'action
-                                "nom": str(article_a_supprimer).strip()
-                            }
-                            response = requests.post(URL_PASSERELLE, json=payload_suppression, timeout=10)
-                           
-                            if response.status_code == 200:
-                                res_json = response.json()
-                                if res_json.get("status") == "success":
-                                    message_suppr_container.success(f"✅ {res_json.get('message')}")
+                article_a_supprimer = st.selectbox("Sélectionnez l'article à supprimer :", liste_articles, key="suppr_select")
+                confirm = st.checkbox("Je confirme la suppression définitive", key="confirm_delete")
+                
+                if st.button("🔴 Supprimer définitivement", type="primary"):
+                    if confirm:
+                        with st.spinner("Suppression en cours..."):
+                            try:
+                                payload = {"action": "suppression_article", "nom": str(article_a_supprimer).strip()}
+                                response = requests.post(URL_PASSERELLE, json=payload, timeout=15)
+                                if response.status_code == 200 and response.json().get("status") == "success":
+                                    message_suppr_container.success("✅ Article supprimé avec succès !")
                                     time.sleep(1.5)
                                     st.rerun()
                                 else:
-                                    message_suppr_container.error(f"Erreur Google Sheets : {res_json.get('message')}")
-                            else:
-                                message_suppr_container.error(f"Erreur réseau (Code {response.status_code})")
-                        except Exception as e:
-                            message_suppr_container.error(f"Erreur : {e}")
-            else:
-                st.info("Aucune donnée disponible à effacer.")
-               
+                                    message_suppr_container.error("Erreur lors de la suppression.")
+                            except Exception as e:
+                                message_suppr_container.error(f"Erreur : {e}")
+                    else:
+                        st.warning("Veuillez cocher la case de confirmation.")
+    
     elif password_input != "":
         st.error("Mot de passe incorrect ❌")
