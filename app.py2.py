@@ -50,7 +50,7 @@ st.markdown("""
 # ====================== CONFIGURATION ======================
 NUMERO_WHATSAPP = "23408167043143"
 MOT_DE_PASSE_ADMIN = "Luxe2026"
-URL_PASSERELLE = "https://script.google.com/macros/s/AKfycbykGuq78OzBGqHT8C82NLehEeLtcKVkTkFhDa5l_Z8k8i0mX_EL2Fmnl57N6SLLvMRa5w/exec" # ← Remplace par ton URL réelle
+URL_PASSERELLE = "1vTrfWKMwbU16-GCc3qRat-z8dYfpq3tdwAHu2WECL8zU03r30UfswDA9InVFWFRnoxFOyvidUIFp8" # ← Remplace par ton URL réelle
 IMGBB_API_KEY = "945cbd1bd1a39645a2d3d04ffb7630ea"
 
 st.markdown('<div class="hero"><h1 class="main-title">COLLECTION LUXE<br>N\'DJAMENA</h1></div>', unsafe_allow_html=True)
