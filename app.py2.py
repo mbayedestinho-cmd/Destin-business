@@ -1,12 +1,8 @@
-import streamlit as st
+mport streamlit as st
 import pandas as pd
 import requests
 import urllib.parse
 import base64
-
-# --- INITIALISATION DE LA MÉMOIRE DE TRACAGE ---
-if 'suivi_clics' not in st.session_state:
-    st.session_state['suivi_clics'] = {}
 
 # 1. Configuration de la page
 st.set_page_config(
@@ -65,7 +61,7 @@ st.markdown("""
         text-align: center;
         box-shadow: 0px 4px 20px rgba(0, 0, 0, 0.02);
         transition: transform 0.3s ease, box-shadow 0.3s ease;
-        margin-bottom: 30px;
+        margin-bottom: 10px;
     }
     .product-card:hover {
         transform: translateY(-4px);
@@ -89,12 +85,12 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- EN-TÊTE ---
+# --- EN-TÊTE BIENVENUE ---
 st.markdown('<h1 class="main-title">COLLECTION<br>LUXE<br>N\'DJAMENA</h1>', unsafe_allow_html=True)
 st.markdown('<div class="stars-icon">✨</div>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">L\'élégance et la haute couture à votre portée</p>', unsafe_allow_html=True)
 
-# --- CONNEXION À GOOGLE SHEETS (LECTURE) ---
+# --- CONNEXION À GOOGLE SHEETS ---
 try:
     id_sheet = st.secrets["ID_DU_SHEET"]
     url_csv = f"https://docs.google.com/spreadsheets/d/{id_sheet}/gviz/tq?tqx=out:csv"
@@ -104,7 +100,7 @@ except Exception as e:
     st.error(f"⚠️ Erreur d'accès au catalogue : {e}")
     df = pd.DataFrame(columns=["nom", "prix", "image"])
 
-# --- AFFICHAGE DES ARTICLES ---
+# --- AFFICHAGE DE LA VITRINE ---
 if not df.empty:
     cols = st.columns(3)
     for index, row in df.iterrows():
@@ -114,7 +110,6 @@ if not df.empty:
                 text_prix = f"{prix_formate:,} FCFA"
             except Exception:
                 text_prix = f"{row['prix']} FCFA"
-                prix_formate = row['prix']
                 
             txt_whatsapp = f"Bonjour Collection Luxe N'Djamena, je souhaite commander cette pièce :\n\n- *Article :* {row['nom']}\n- *Prix :* {text_prix}"
             url_whatsapp = f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(txt_whatsapp)}"
@@ -127,24 +122,13 @@ if not df.empty:
                 </div>
             """, unsafe_allow_html=True)
             
-            if st.button(f"💬 Commander sur WhatsApp", key=f"btn_{index}_{row['nom']}"):
-                try:
-                    payload_clic = {
-                        "action": "enregistrement_clic",
-                        "article": row['nom'],
-                        "prix": row['prix']
-                    }
-                    requests.post(URL_PASSERELLE, json=payload_clic, timeout=4)
-                except Exception:
-                    pass
-                js = f"window.open('{url_whatsapp}')"
-                st.components.v1.html(f"<script>{js}</script>", height=0)
-                
-            st.markdown("</div>", unsafe_allow_html=True)
+            # Bouton natif pour éviter les blocages de fenêtres pop-up
+            st.link_button("💬 Commander sur WhatsApp", url=url_whatsapp, use_container_width=True)
+            st.markdown("<br>", unsafe_allow_html=True)
 else:
     st.info("Le catalogue est en cours de mise à jour. Revenez dans un instant !")
 
-# --- PANNEAU ADMIN SÉCURISÉ ---
+# --- PANNEAU ADMINISTRATION SÉCURISÉ ---
 with st.sidebar:
     st.markdown("### ⚙️ Authentification Admin")
     password_input = st.text_input("Entrez le mot de passe de la boutique", type="password")
@@ -152,8 +136,9 @@ with st.sidebar:
     if password_input == MOT_DE_PASSE_ADMIN:
         st.success("Accès autorisé 🔓")
         st.write("---")
-        st.markdown("### ➕ Ajouter un nouvel article")
         
+        # ➕ FORMULAIRE D'AJOUT D'ARTICLE
+        st.markdown("### ➕ Ajouter un nouvel article")
         with st.form("form_ajout", clear_on_submit=True):
             nom = st.text_input("Nom du vêtement / de la pièce :")
             prix = st.number_input("Prix de vente en boutique (FCFA) :", min_value=0, step=5000)
@@ -164,59 +149,66 @@ with st.sidebar:
             
             bouton_ajout = st.form_submit_button("🚀 Mettre en vente immédiatement")
             
-            if bouton_ajout and nom and prix and uploaded_file:
-                with st.spinner("Téléversement et enregistrement en cours..."):
-                    try:
-                        img_bytes = uploaded_file.read()
-                        base64_image = base64.b64encode(img_bytes).decode('utf-8')
-                       
-                        api_key = st.secrets.get("IMGBB_API_KEY", "70be83b276ba6ccbf03b71597dfc2a5d")
-                        res_img = requests.post(
-                            "https://api.imgbb.com/1/upload",
-                            data={"key": api_key, "image": base64_image}
-                        )
-                        img_url = res_img.json()["data"]["url"]
-                       
-                        payload = {
-                            "nom": nom,
-                            "prix": prix,
-                            "image": img_url,
-                            "tailles": tailles_input,
-                            "couleurs": couleurs_input,
-                            "stock": stock_input
-                        }
-                       
-                        res = requests.post(URL_PASSERELLE, json=payload, timeout=10)
-                        if res.status_code == 200:
-                            st.success("🎉 Article mis en ligne avec succès ! Actualisez la page (F5).")
-                        else:
-                            st.error("Erreur lors de l'enregistrement dans le catalogue Sheets.")
+            if bouton_ajout:
+                if nom and prix and uploaded_file:
+                    with st.spinner("Téléversement de l'image et publication..."):
+                        try:
+                            img_bytes = uploaded_file.read()
+                            base64_image = base64.b64encode(img_bytes).decode('utf-8')
                            
-                    except Exception as e:
-                        st.error(f"⚠️ Échec du téléversement de l'image : {e}")
-                        
-        # 🗑️ SECTION DE SUPPRESSION D'UN ARTICLE
+                            api_key = st.secrets.get("IMGBB_API_KEY", "70be83b276ba6ccbf03b71597dfc2a5d")
+                            res_img = requests.post(
+                                "https://api.imgbb.com/1/upload",
+                                data={"key": api_key, "image": base64_image}
+                            )
+                            img_url = res_img.json()["data"]["url"]
+                           
+                            payload = {
+                                "nom": nom,
+                                "prix": prix,
+                                "image": img_url,
+                                "tailles": tailles_input,
+                                "couleurs": couleurs_input,
+                                "stock": stock_input
+                            }
+                           
+                            res = requests.post(URL_PASSERELLE, json=payload, timeout=10)
+                            if res.status_code == 200:
+                                st.success("🎉 Article mis en ligne !")
+                                st.rerun()
+                            else:
+                                st.error("Erreur d'enregistrement dans Google Sheets.")
+                        except Exception as e:
+                            st.error(f"⚠️ Échec de l'opération : {e}")
+                else:
+                    st.warning("Veuillez remplir les champs obligatoires (Nom, Prix, Photo).")
+                            
+        # 🗑️ SECTION CORBEILLE / RETRAIT D'ARTICLE
         st.markdown("---")
-        st.markdown("### 🗑️ Supprimer un article")
+        st.markdown("### 🗑️ Retirer un article du catalogue")
        
-        if not df.empty:
-            liste_articles = df.iloc[:, 0].tolist()
+        if not df.empty and 'nom' in df.columns:
+            liste_articles = df['nom'].tolist()
             article_a_supprimer = st.selectbox("Sélectionnez l'article à retirer :", liste_articles)
            
             if st.button("🔴 Supprimer définitivement"):
-                try:
-                    payload_suppression = {
-                        "action": "suppression_article",
-                        "nom": article_a_supprimer
-                    }
-                    response = requests.post(URL_PASSERELLE, json=payload_suppression, timeout=4)
-                   
-                    if response.status_code == 200:
-                        st.success(f"L'article '{article_a_supprimer}' a été retiré avec succès ! Rappuyez sur F5.")
-                    else:
-                        st.error("Impossible de joindre Google Sheets pour la suppression.")
-                except Exception as e:
-                    st.error(f"Erreur de connexion : {e}")
-                    
+                with st.spinner("Retrait de l'article en cours..."):
+                    try:
+                        payload_suppression = {
+                            "action": "suppression_article",
+                            "nom": article_a_supprimer
+                        }
+                        response = requests.post(URL_PASSERELLE, json=payload_suppression, timeout=5)
+                       
+                        if response.status_code == 200:
+                            st.success(f"'{article_a_supprimer}' a bien été retiré.")
+                            st.rerun()
+                        else:
+                            st.error("Impossible de valider la suppression sur Google Sheets.")
+                    except Exception as e:
+                        st.error(f"Erreur réseau : {e}")
+        else:
+            st.info("Aucun article disponible pour suppression.")
+                        
     elif password_input != "":
         st.error("Mot de passe incorrect ❌")
