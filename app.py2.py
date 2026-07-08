@@ -21,10 +21,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Configuration
-NUMERO_WHATSAPP = "23408167043143"
-MOT_DE_PASSE_ADMIN = "Luxe2026"
-URL_PASSERELLE = "https://script.google.com/macros/s/AKfycbykGuq78OzBGqHT8C82NLehEeLtcKVkTkFhDa5l_Z8k8i0mX_EL2Fmnl57N6SLLvMRa5w/exec" # ← Remplace par ton URL
-IMGBB_API_KEY = "945cbd1bd1a39645a2d3d04ffb7630ea"
+NUMERO_WHATSAPP = st.secrets[ "NUMERO_WHATSAPP"]
+MOT_DE_PASSE_ADMIN = st.secrets[ "ADMIN_PASSWORD"]
+URL_PASSERELLE = st.secrets[ "URL_PASSERELLE_WEB"] # ← Remplace par ton URL
+IMGBB_API_KEY = st.secrets[ "IMGBB_APPI_KEY"]
 
 st.markdown('<div class="hero"><h1 class="main-title">COLLECTION LUXE<br>N\'DJAMENA</h1></div>', unsafe_allow_html=True)
 
