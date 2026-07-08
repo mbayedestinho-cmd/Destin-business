@@ -24,7 +24,7 @@ st.markdown("""
 NUMERO_WHATSAPP = st.secrets[ "NUMERO_WHATSAPP"]
 MOT_DE_PASSE_ADMIN = st.secrets[ "ADMIN_PASSWORD"]
 URL_PASSERELLE = st.secrets[ "URL_PASSERELLE_WEB"] # ← Remplace par ton URL
-IMGBB_API_KEY = st.secrets[ "IMGBB_APPI_KEY"]
+IMGBB_API_KEY = st.secrets[ "IMGBB_API_KEY"]
 
 st.markdown('<div class="hero"><h1 class="main-title">COLLECTION LUXE<br>N\'DJAMENA</h1></div>', unsafe_allow_html=True)
 
