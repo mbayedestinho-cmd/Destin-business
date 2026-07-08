@@ -155,15 +155,15 @@ with st.sidebar:
                             img_bytes = uploaded_file.read()
                             base64_image = base64.b64encode(img_bytes).decode('utf-8')
                            
-                            # Récupération sécurisée de la clé ImgBB
-                            api_key = st.secrets.get("IMGBB_API_KEY", "70be83b276ba6ccbf03b71597dfc2a5d")
+                            # Utilisation directe et forcée de votre nouvelle clé API ImgBB
+                            api_key = "C0e31ddc27c82849461799d031c85ba6"
+                            
                             res_img = requests.post(
                                 "https://api.imgbb.com/1/upload",
                                 data={"key": api_key, "image": base64_image}
                             )
                             res_json = res_img.json()
                             
-                            # Vérification de la validité de la réponse ImgBB
                             if "data" in res_json:
                                 img_url = res_json["data"]["url"]
                             else:
