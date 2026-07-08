@@ -23,7 +23,7 @@ st.markdown("""
 # Configuration
 NUMERO_WHATSAPP = "23408167043143"
 MOT_DE_PASSE_ADMIN = "Luxe2026"
-URL_PASSERELLE = "https://script.google.com/macros/s/AKfycbykGuq78OzBGqHT8C82NLehEeLtcKVkTkFhDa5l_Z8k8i0mX_EL2Fmnl57N6SLLvMRa5w/exec" # ← Remplace par ton URL réelle
+URL_PASSERELLE = "https://script.google.com/macros/s/AKfycbykGuq78OzBGqHT8C82NLehEeLtcKVkTkFhDa5l_Z8k8i0mX_EL2Fmnl57N6SLLvMRa5w/exec" # ← Remplace par ton URL
 
 st.markdown('<div class="hero"><h1 class="main-title">COLLECTION LUXE<br>N\'DJAMENA</h1></div>', unsafe_allow_html=True)
 
@@ -92,6 +92,8 @@ if not df_filtered.empty:
                     st.write(f"**Tailles :** {row.get('tailles', 'Unique')}")
                     st.write(f"**Couleurs :** {row.get('couleurs', '—')}")
                     st.write(f"**Stock :** {row.get('stock', '—')} pièces")
+else:
+    st.info("Aucun article trouvé.")
 
 # ====================== PANIER ======================
 with st.sidebar:
@@ -102,9 +104,8 @@ with st.sidebar:
         
         for i, item in enumerate(st.session_state.cart):
             col1, col2, col3 = st.columns([5,2,1])
-            with col1:
-                st.write(f"{item['nom']} × {item.get('quantite', 1)}")
-            with col2:
+            with col1: st.write(f"{item['nom']} × {item.get('quantite', 1)}")
+            with col2: 
                 q = st.number_input("Qté", min_value=1, value=item.get('quantite', 1), key=f"q{i}")
                 if q != item.get('quantite', 1):
                     item['quantite'] = q
@@ -123,7 +124,7 @@ with st.sidebar:
     else:
         st.info("Panier vide")
 
-    # ====================== ADMIN COMPLET ======================
+    # ====================== ADMIN ======================
     st.markdown("---")
     st.header("⚙️ Administration")
     password = st.text_input("Mot de passe admin", type="password")
@@ -165,31 +166,26 @@ with st.sidebar:
                                 time.sleep(1.5)
                                 st.rerun()
                             else:
-                                st.error("Erreur lors de l'ajout")
+                                st.error("Échec de l'ajout (vérifie le script Google)")
                         except Exception as e:
                             st.error(f"Erreur : {e}")
         
-        # LISTE + MODIFICATION + SUPPRESSION
+        # LISTE + SUPPRESSION
         st.subheader("📋 Articles existants")
         if not df_admin.empty:
-            st.dataframe(df_admin[['nom', 'prix', 'tailles', 'couleurs', 'stock']], use_container_width=True)
+            st.dataframe(df_admin, use_container_width=True)
             
-            article = st.selectbox("Sélectionner un article", df_admin['nom'].dropna().astype(str).unique())
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("🗑️ Supprimer", type="primary"):
-                    try:
-                        r = requests.post(URL_PASSERELLE, json={"action": "suppression_article", "nom": article})
-                        st.success("Article supprimé !")
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(e)
-            with col2:
-                st.info("Modification complète disponible dans la prochaine version")
+            article = st.selectbox("Sélectionner un article", df_admin['nom'].dropna().astype(str).unique(), key="suppr_select")
+            if st.button("🗑️ Supprimer cet article", type="primary"):
+                try:
+                    r = requests.post(URL_PASSERELLE, json={"action": "suppression_article", "nom": article})
+                    st.success("Article supprimé !")
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erreur : {e}")
         else:
-            st.info("Aucun article pour le moment")
+            st.info("Aucun article dans le catalogue")
             
     elif password:
         st.error("Mot de passe incorrect")
