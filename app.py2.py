@@ -69,13 +69,11 @@ def load_data(sheet_name="Catalogue"):
         url = f"https://docs.google.com/spreadsheets/d/{ID_SHEET}/gviz/tq?tqx=out:csv&sheet={sheet_name}&nocache={int(time.time())}"
         df = pd.read_csv(url)
         df.columns = [col.lower().strip() for col in df.columns]
-        # Ligne corrigée :
+        # Ligne corrigée (important) :
         return df.loc[:, \~df.columns.str.contains('^unnamed', case=False)]
-    except:
+    except Exception as e:
+        st.error(f"Erreur de chargement : {e}")
         return pd.DataFrame()
-df_catalogue = load_data("Catalogue")
-df_commandes = load_data("Commandes")
-
 # ====================== CATALOGUE CLIENT ======================
 st.subheader("Notre Collection")
 
