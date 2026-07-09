@@ -48,10 +48,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ====================== CONFIGURATION ======================
-NUMERO_WHATSAPP = "23408167043143"
-MOT_DE_PASSE_ADMIN = "Luxe2026"
+NUMERO_WHATSAPP = st.secrets.get("NUMERO_WHATSAPP")
+MOT_DE_PASSE_ADMIN = st.secrets.get( "ADMIN_PASSWORD")
 URL_PASSERELLE = st.secrets.get( "URL_PASSERELLE_WEB") # ← Remplace par ton URL réelle
-IMGBB_API_KEY = "945cbd1bd1a39645a2d3d04ffb7630ea"
+IMGBB_API_KEY = st.secrets.get("IMGBB_API_KEY")
 
 st.markdown('<div class="hero"><h1 class="main-title">COLLECTION LUXE<br>N\'DJAMENA</h1></div>', unsafe_allow_html=True)
 
