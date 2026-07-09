@@ -108,7 +108,11 @@ if not df_f.empty:
         with cols[idx % 3]:
             prix = int(row['prix_numeric'])
             image_url = str(row.get('image', ''))
-            stock = int(pd.to_numeric(row.get('stock', 0), errors='coerce'))
+            # 1. On tente la conversion numérique (les textes/vides deviennent NaN)
+stock_tmp = pd.to_numeric(row.get('stock', 0), errors='coerce')
+# 2. Si c'est un NaN (valeur manquante), on met 0 par défaut, sinon on transforme en int
+stock = int(stock_tmp) if pd.notna(stock_tmp) else 0
+
             stock_class = "stock-low" if stock < 5 else "stock"
             nom_article = str(row.get('nom', 'Article'))
             
