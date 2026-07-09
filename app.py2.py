@@ -108,8 +108,8 @@ if not df_f.empty:
             prix = int(row['prix_numeric'])
             image_url = str(row.get('image', ''))
             # Conversion sécurisée du stock (évite le crash si la case est vide)
-stock_tmp = pd.to_numeric(row.get('stock', 0), errors='coerce')
-stock = int(stock_tmp) if pd.notna(stock_tmp) else 0
+            stock_tmp = pd.to_numeric(row.get('stock', 0), errors='coerce')
+            stock = int(stock_tmp) if pd.notna(stock_tmp) else 0
 
             stock_class = "stock-low" if stock < 5 else "stock"
             nom_article = str(row.get('nom', 'Article'))
