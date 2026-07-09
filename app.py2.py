@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import requests
@@ -22,11 +23,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ====================== CONFIG ======================
-NUMERO_WHATSAPP = st.secrets.get("NUMERO_WHATSAPP")
-MOT_DE_PASSE_ADMIN = st.secrets.get("ADMIN_PASSWORD")
-URL_PASSERELLE = st.secrets.get("URL_PASSERELLE_WEB")
-ID_SHEET = st.secrets.get("ID_DU_SHEET", "").strip()
-IMGBB_API_KEY = st.secrets.get("IMGBB_API_KEY")
+NUMERO_WHATSAPP = st.secrets.get("NUMERO_WHATSAPP", "")
+MOT_DE_PASSE_ADMIN = st.secrets.get("ADMIN_PASSWORD", "")
+URL_PASSERELLE = st.secrets.get("URL_PASSERELLE_WEB", "")
+ID_SHEET = st.secrets.get("ID_DU_SHEET", "")
+if ID_SHEET: 
+    ID_SHEET = ID_SHEET.strip()
+IMGBB_API_KEY = st.secrets.get("IMGBB_API_KEY", "")
 
 st.markdown('<div class="hero"><h1 class="main-title">COLLECTION LUXE<br>N\'DJAMENA</h1></div>', unsafe_allow_html=True)
 
@@ -35,17 +38,23 @@ if 'cart' not in st.session_state:
 
 # ====================== CHARGEMENT DONNÉES ======================
 @st.cache_data(ttl=120)
-def load_data(sheet_name="Catalogue"):
+def load_data(sheet_id, sheet_name="Catalogue"):
+    if not sheet_id:
+        return pd.DataFrame()
     try:
-        url = f"https://docs.google.com/spreadsheets/d/{ID_SHEET}/gviz/tq?tqx=out:csv&sheet={sheet_name}&nocache={int(time.time())}"
+        # L'URL est simplifiée, ttl=120 gère déjà le rafraîchissement
+        url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
         df = pd.read_csv(url)
         df.columns = [col.lower().strip() for col in df.columns]
-        return df.loc[:, \~df.columns.str.contains('^unnamed', case=False)]
+        # Nettoyage des colonnes fantômes et des lignes vides
+        df = df.loc[:, ~df.columns.str.contains('^unnamed', case=False)]
+        df = df.dropna(subset=['nom', 'prix'])
+        return df
     except Exception as e:
         st.error(f"Erreur de chargement des données : {e}")
         return pd.DataFrame()
 
-df_catalogue = load_data("Catalogue")
+df_catalogue = load_data(ID_SHEET, "Catalogue")
 
 # ====================== FILTRES ======================
 st.subheader("Notre Collection")
@@ -56,11 +65,18 @@ with col1:
     search = st.text_input("🔍 Rechercher par nom", "")
 with col2: 
     min_price, max_price = st.slider("Fourchette de prix (FCFA)", 0, 500000, (0, 300000), 10000)
+
+cats = ["Toutes"]
+tailles_list = ["Toutes"]
+if not df_catalogue.empty:
+    if 'categorie' in df_catalogue.columns:
+        cats += sorted(df_catalogue['categorie'].dropna().astype(str).unique())
+    if 'tailles' in df_catalogue.columns:
+        tailles_list += sorted(df_catalogue['tailles'].dropna().astype(str).unique())
+
 with col3: 
-    cats = ["Toutes"] + sorted(df_catalogue.get('categorie', pd.Series()).dropna().astype(str).unique())
     cat_filter = st.selectbox("Catégorie", cats)
 with col4:
-    tailles_list = ["Toutes"] + sorted(df_catalogue.get('tailles', pd.Series()).dropna().astype(str).unique())
     taille_filter = st.selectbox("Taille", tailles_list)
 with col5:
     sort_option = st.selectbox("Trier par", ["Pertinence", "Prix croissant", "Prix décroissant"])
@@ -68,15 +84,16 @@ with col5:
 # ====================== APPLICATION DES FILTRES ======================
 df_f = df_catalogue.copy()
 
-if search:
-    df_f = df_f[df_f.get('nom', '').astype(str).str.contains(search, case=False, na=False)]
-if cat_filter != "Toutes":
-    df_f = df_f[df_f.get('categorie','').astype(str).str.contains(cat_filter, case=False, na=False)]
-if taille_filter != "Toutes":
-    df_f = df_f[df_f.get('tailles','').astype(str).str.contains(taille_filter, case=False, na=False)]
-
 if not df_f.empty:
-    df_f['prix_numeric'] = pd.to_numeric(df_f.get('prix'), errors='coerce')
+    if search:
+        df_f = df_f[df_f['nom'].astype(str).str.contains(search, case=False, na=False)]
+    if cat_filter != "Toutes" and 'categorie' in df_f.columns:
+        df_f = df_f[df_f['categorie'].astype(str).str.contains(cat_filter, case=False, na=False)]
+    if taille_filter != "Toutes" and 'tailles' in df_f.columns:
+        df_f = df_f[df_f['tailles'].astype(str).str.contains(taille_filter, case=False, na=False)]
+
+    # Conversion stricte des prix pour le tri
+    df_f['prix_numeric'] = pd.to_numeric(df_f['prix'], errors='coerce').fillna(0)
     df_f = df_f[(df_f['prix_numeric'] >= min_price) & (df_f['prix_numeric'] <= max_price)]
 
     if sort_option == "Prix croissant":
@@ -89,10 +106,11 @@ if not df_f.empty:
     cols = st.columns(3)
     for idx, row in df_f.reset_index(drop=True).iterrows():
         with cols[idx % 3]:
-            prix = int(float(row.get('prix_numeric', row.get('prix', 0))))
-            image_url = row.get('image', '')
-            stock = int(row.get('stock', 0))
+            prix = int(row['prix_numeric'])
+            image_url = str(row.get('image', ''))
+            stock = int(pd.to_numeric(row.get('stock', 0), errors='coerce'))
             stock_class = "stock-low" if stock < 5 else "stock"
+            nom_article = str(row.get('nom', 'Article'))
             
             st.markdown(f"""
                 <div class="product-card">
@@ -100,61 +118,61 @@ if not df_f.empty:
                         <img src="{image_url}" style="width:100%; border-radius:12px; margin-bottom:10px; aspect-ratio:1/1; object-fit:cover;" 
                              onerror="this.src='https://via.placeholder.com/300x300?text=Image+non+disponible';">
                     </a>
-                    <h3>{row.get('nom', 'Article')}</h3>
+                    <h3>{nom_article}</h3>
                     <div class="price">{prix:,} FCFA</div>
                     <div class="{stock_class}">Stock : {stock} pièce(s)</div>
                 </div>
             """, unsafe_allow_html=True)
             
-            if st.button("🛒 Ajouter au panier", key=f"add_{idx}_{hash(str(row.get('nom')))}"):
-                existing = next((item for item in st.session_state.cart if item.get('nom') == row.get('nom')), None)
+            if st.button("🛒 Ajouter au panier", key=f"add_{idx}_{hash(nom_article)}"):
+                existing = next((item for item in st.session_state.cart if item['nom'] == nom_article), None)
                 if existing:
                     existing['quantite'] += 1
                 else:
                     st.session_state.cart.append({
-                        "nom": row.get('nom'), 
+                        "nom": nom_article, 
                         "prix": prix, 
                         "image": image_url, 
                         "quantite": 1
                     })
-                st.toast("✅ Ajouté au panier !", icon="🛍️")
-                st.rerun()
+                st.toast(f"✅ {nom_article} ajouté au panier !", icon="🛍️")
 else:
-    st.info("Aucun article ne correspond à vos critères.")
+    st.info("Aucun article ne correspond à vos critères ou le catalogue est vide.")
 
 # ====================== PANIER ======================
 with st.sidebar:
     st.header("🛍️ Mon Panier")
     if st.session_state.cart:
-        total = sum(item['prix'] * item.get('quantite', 1) for item in st.session_state.cart)
+        total = sum(item['prix'] * item['quantite'] for item in st.session_state.cart)
         st.success(f"**Total : {total:,} FCFA**".replace(",", " "))
 
         for i, item in enumerate(st.session_state.cart.copy()):
             c1, c2, c3 = st.columns([5, 2, 1])
             with c1: 
-                st.write(f"{item['nom']} × {item.get('quantite', 1)}")
+                st.write(f"{item['nom']}")
             with c2:
-                q = st.number_input("Qté", min_value=1, value=item.get('quantite', 1), key=f"q{i}")
-                if q != item.get('quantite', 1):
-                    st.session_state.cart[i]['quantite'] = q
-                    st.rerun()
+                # Retrait du st.rerun() inutile, Streamlit gère le state tout seul
+                new_q = st.number_input("Qté", min_value=1, value=item['quantite'], key=f"q_{i}")
+                st.session_state.cart[i]['quantite'] = new_q
             with c3:
-                if st.button("🗑️", key=f"del{i}"):
+                # Ajout de padding pour aligner la corbeille avec l'input
+                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                if st.button("🗑️", key=f"del_{i}"):
                     st.session_state.cart.pop(i)
                     st.rerun()
 
+        st.markdown("---")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("📱 WhatsApp", type="secondary", use_container_width=True):
-                msg = "Bonjour, voici ma commande :\n\n"
-                for item in st.session_state.cart:
-                    msg += f"- {item['nom']} × {item.get('quantite',1)} = {item['prix']*item.get('quantite',1):,} FCFA\n"
-                msg += f"\n**Total : {total:,} FCFA**"
-                st.link_button("Ouvrir WhatsApp", f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(msg)}", use_container_width=True)
+            msg = "Bonjour, voici ma commande :\n\n"
+            for item in st.session_state.cart:
+                msg += f"- {item['nom']} × {item['quantite']} = {item['prix'] * item['quantite']:,} FCFA\n"
+            msg += f"\n**Total : {total:,} FCFA**"
+            st.link_button("📱 WhatsApp", f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(msg)}", use_container_width=True)
 
         with col2:
-            if st.button("✅ Enregistrer + Telegram", type="primary", use_container_width=True):
-                with st.spinner("Enregistrement de la commande..."):
+            if st.button("✅ Valider", type="primary", use_container_width=True):
+                with st.spinner("Enregistrement..."):
                     payload = {
                         "action": "nouvelle_commande",
                         "password": MOT_DE_PASSE_ADMIN,
@@ -165,11 +183,14 @@ with st.sidebar:
                     try:
                         r = requests.post(URL_PASSERELLE, json=payload, timeout=15)
                         if r.status_code == 200:
-                            st.success("✅ Commande enregistrée ! Notification envoyée.")
+                            st.success("✅ Commande enregistrée !")
                             st.session_state.cart = []
+                            time.sleep(2)
                             st.rerun()
+                        else:
+                            st.error("Erreur serveur.")
                     except Exception as e:
-                        st.error(f"Erreur : {e}")
+                        st.error(f"Erreur réseau : {e}")
     else:
         st.info("Votre panier est vide.")
 
@@ -178,7 +199,7 @@ with st.sidebar:
     st.header("⚙️ Administration")
     password = st.text_input("Mot de passe admin", type="password")
 
-    if password == MOT_DE_PASSE_ADMIN:
+    if password == MOT_DE_PASSE_ADMIN and MOT_DE_PASSE_ADMIN != "":
         st.success("✅ Accès autorisé")
         tab1, tab2, tab3 = st.tabs(["➕ Ajouter", "✏️ Modifier", "🗑️ Supprimer"])
 
@@ -186,7 +207,7 @@ with st.sidebar:
             st.subheader("Ajouter un article")
             with st.form("add_form", clear_on_submit=True):
                 nom = st.text_input("Nom de l'article*")
-                prix = st.number_input("Prix (FCFA)", min_value=0)
+                prix = st.number_input("Prix (FCFA)", min_value=0, step=1000)
                 uploaded = st.file_uploader("Photo*", type=["jpg", "png", "jpeg"])
                 tailles = st.text_input("Tailles", "Unique")
                 couleurs = st.text_input("Couleurs", "")
@@ -199,22 +220,30 @@ with st.sidebar:
                             try:
                                 b64 = base64.b64encode(uploaded.getvalue()).decode()
                                 res = requests.post("https://api.imgbb.com/1/upload", data={"key": IMGBB_API_KEY, "image": b64})
-                                img_url = res.json()["data"]["url"]
-                                
-                                payload = {
-                                    "action": "ajout_article",
-                                    "password": MOT_DE_PASSE_ADMIN,
-                                    "nom": nom, "prix": prix, "image": img_url,
-                                    "tailles": tailles, "couleurs": couleurs,
-                                    "categorie": categorie, "stock": stock
-                                }
-                                r = requests.post(URL_PASSERELLE, json=payload, timeout=20)
-                                if r.status_code == 200:
-                                    st.success("✅ Article ajouté avec succès !")
-                                    time.sleep(1)
-                                    st.rerun()
+                                if res.status_code == 200 and "data" in res.json():
+                                    img_url = res.json()["data"]["url"]
+                                    
+                                    payload = {
+                                        "action": "ajout_article",
+                                        "password": MOT_DE_PASSE_ADMIN,
+                                        "nom": nom, "prix": prix, "image": img_url,
+                                        "tailles": tailles, "couleurs": couleurs,
+                                        "categorie": categorie, "stock": stock
+                                    }
+                                    r = requests.post(URL_PASSERELLE, json=payload, timeout=20)
+                                    if r.status_code == 200:
+                                        st.success("✅ Article ajouté avec succès !")
+                                        time.sleep(1.5)
+                                        st.cache_data.clear() # Force le rafraîchissement des données
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Erreur API Google : {r.text}")
+                                else:
+                                    st.error("Échec de l'upload de l'image (Vérifiez la clé ImgBB).")
                             except Exception as e:
-                                st.error(f"Erreur : {e}")
+                                st.error(f"Erreur technique : {e}")
+                    else:
+                        st.warning("Veuillez remplir le nom et ajouter une photo.")
 
         with tab2:
             st.subheader("Modifier un article")
@@ -226,21 +255,22 @@ with st.sidebar:
                     art = df_catalogue[df_catalogue['nom'].astype(str) == article_to_edit].iloc[0]
                     with st.form("edit_form"):
                         new_nom = st.text_input("Nouveau nom", art.get('nom', ''))
-                        new_prix = st.number_input("Nouveau prix", value=int(float(art.get('prix', 0))))
+                        new_prix = st.number_input("Nouveau prix", value=int(pd.to_numeric(art.get('prix', 0), errors='coerce')))
                         new_tailles = st.text_input("Tailles", art.get('tailles', 'Unique'))
                         new_couleurs = st.text_input("Couleurs", art.get('couleurs', ''))
                         new_categorie = st.text_input("Catégorie", art.get('categorie', 'Vêtements'))
-                        new_stock = st.number_input("Stock", value=int(art.get('stock', 0)))
+                        new_stock = st.number_input("Stock", value=int(pd.to_numeric(art.get('stock', 0), errors='coerce')))
                         new_image = st.file_uploader("Nouvelle photo (optionnel)", type=["jpg","png","jpeg"])
                         
                         if st.form_submit_button("Enregistrer les modifications"):
                             with st.spinner("Mise à jour..."):
                                 try:
-                                    img_url = art.get('image')
+                                    img_url = str(art.get('image', ''))
                                     if new_image is not None:
                                         b64 = base64.b64encode(new_image.getvalue()).decode()
                                         res = requests.post("https://api.imgbb.com/1/upload", data={"key": IMGBB_API_KEY, "image": b64})
-                                        img_url = res.json()["data"]["url"]
+                                        if "data" in res.json():
+                                            img_url = res.json()["data"]["url"]
                                     
                                     payload = {
                                         "action": "modification_article",
@@ -257,7 +287,8 @@ with st.sidebar:
                                     r = requests.post(URL_PASSERELLE, json=payload, timeout=20)
                                     if r.status_code == 200:
                                         st.success("✅ Article modifié avec succès !")
-                                        time.sleep(1)
+                                        time.sleep(1.5)
+                                        st.cache_data.clear()
                                         st.rerun()
                                 except Exception as e:
                                     st.error(f"Erreur : {e}")
@@ -266,8 +297,13 @@ with st.sidebar:
             st.subheader("Supprimer un article")
             if not df_catalogue.empty:
                 article_suppr = st.selectbox("Choisir l'article à supprimer", df_catalogue['nom'].dropna().astype(str).unique())
-                if st.button("🗑️ Supprimer définitivement", type="primary"):
-                    if st.checkbox("Je confirme la suppression définitive de cet article", value=False):
+                
+                # Correction du système de case à cocher (placée AVANT le bouton)
+                confirm = st.checkbox("Je confirme la suppression définitive de cet article")
+                
+                # Le bouton est désactivé tant que la case n'est pas cochée
+                if st.button("🗑️ Supprimer définitivement", type="primary", disabled=not confirm):
+                    with st.spinner("Suppression en cours..."):
                         try:
                             payload = {
                                 "action": "suppression_article",
@@ -277,14 +313,15 @@ with st.sidebar:
                             r = requests.post(URL_PASSERELLE, json=payload, timeout=15)
                             if r.status_code == 200:
                                 st.success("✅ Article supprimé avec succès !")
-                                time.sleep(1)
+                                time.sleep(1.5)
+                                st.cache_data.clear()
                                 st.rerun()
+                            else:
+                                st.error("Erreur du serveur lors de la suppression.")
                         except Exception as e:
                             st.error(f"Erreur : {e}")
-                    else:
-                        st.warning("Veuillez cocher la case de confirmation.")
 
-    elif password:
+    elif password != "":
         st.error("❌ Mot de passe incorrect")
 
 st.caption("Collection Luxe N'Djamena © 2026")
