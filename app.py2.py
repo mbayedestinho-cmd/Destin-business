@@ -60,33 +60,27 @@ if 'cart' not in st.session_state:
 
 # ====================== CHARGEMENT DES DONNÉES ======================
 try:
-    id_sheet = st.secrets.get("ID_DU_SHEET", "")
-    
-    if not id_sheet:
-        st.error("❌ ID_DU_SHEET manquant dans les Secrets")
-        st.stop()
-    
+    id_sheet = st.secrets.get("ID_DU_SHEET", "").strip()
     url_csv = f"https://docs.google.com/spreadsheets/d/{id_sheet}/gviz/tq?tqx=out:csv&nocache={int(time.time())}"
+    
     df_raw = pd.read_csv(url_csv)
     df_raw.columns = [col.lower().strip() for col in df_raw.columns]
+    
+    # Nettoyage des colonnes inutiles
+    df_raw = df_raw.loc[:, ~df_raw.columns.str.contains('^unnamed', case=False)]
     
     df = df_raw.dropna(subset=['nom', 'image']).copy()
     df_admin = df_raw.copy()
     
-    st.success(f"✅ {len(df)} articles chargés avec succès !")
-    st.caption(f"Colonnes : {list(df_raw.columns)}")
-    
+    # Messages discrets (visibles seulement en mode développement)
+    if st.checkbox("🔧 Mode Debug", value=False):
+        st.success(f"{len(df)} articles chargés")
+        st.caption(f"Colonnes : {list(df_raw.columns)}")
+        
 except Exception as e:
     st.error(f"Erreur de chargement : {e}")
-    st.markdown("""
-    **🔧 Comment corriger ?**
-    1. Va dans ton Google Sheet → Fichier → **Publier sur le web**
-    2. Choisis "Tout le document" → Clique sur **Publier**
-    3. Copie l'ID du sheet et mets-le dans les Secrets Streamlit
-    """)
     df = pd.DataFrame()
     df_admin = pd.DataFrame()
-
 # ====================== CLIENT + CATALOGUE ======================
 st.subheader("Notre Collection")
 
