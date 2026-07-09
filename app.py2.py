@@ -152,6 +152,20 @@ else:
     st.info("Aucun article trouvé.")
 
 # ====================== PANIER ======================
+for i, item in enumerate(st.session_state.cart):
+    col1, col2, col3 = st.columns([5, 2, 1])
+    with col1: 
+        st.write(f"{item['nom']} × {item.get('quantite', 1)}")
+    with col2:
+        # CORRECTION : Utilisation du nom dans la key au lieu de l'index i
+        q = st.number_input("Qté", min_value=1, value=item.get('quantite', 1), key=f"q_{item['nom']}")
+        if q != item.get('quantite', 1):
+            item['quantite'] = q
+            st.rerun()
+    with col3:
+        if st.button("🗑️", key=f"del_{item['nom']}" ):
+            st.session_state.cart.pop(i)
+            st.rerun()
 with st.sidebar:
     st.header("🛍️ Mon Panier")
     if st.session_state.cart:
