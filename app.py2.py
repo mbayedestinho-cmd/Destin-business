@@ -69,10 +69,10 @@ def load_data(sheet_name="Catalogue"):
         url = f"https://docs.google.com/spreadsheets/d/{ID_SHEET}/gviz/tq?tqx=out:csv&sheet={sheet_name}&nocache={int(time.time())}"
         df = pd.read_csv(url)
         df.columns = [col.lower().strip() for col in df.columns]
+        # Ligne corrigée :
         return df.loc[:, \~df.columns.str.contains('^unnamed', case=False)]
     except:
         return pd.DataFrame()
-
 df_catalogue = load_data("Catalogue")
 df_commandes = load_data("Commandes")
 
