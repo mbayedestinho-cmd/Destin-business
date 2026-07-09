@@ -11,46 +11,15 @@ st.set_page_config(page_title="Collection Luxe N'Djamena", page_icon="✨", layo
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Poppins:wght@300;400;500&display=swap');
-    .main-title {
-        font-family: 'Playfair Display', serif;
-        font-size: clamp(2.8rem, 8vw, 4.2rem);
-        font-weight: 700;
-        text-align: center;
-        margin: 30px 0 20px 0;
-        color: #fff;
-    }
-    .hero {
-        background: linear-gradient(rgba(0,0,0,0.65), rgba(0,0,0,0.65)),
-                    url('https://source.unsplash.com/random/1600x900/?luxury-fashion,african');
-        background-size: cover;
-        background-position: center;
-        padding: 130px 20px;
-        text-align: center;
-        color: white;
-        border-radius: 20px;
-        margin-bottom: 40px;
-    }
-    .product-card {
-        background: white;
-        border-radius: 16px;
-        padding: 16px;
-        box-shadow: 0 4px 25px rgba(0,0,0,0.06);
-        transition: 0.3s;
-        height: 100%;
-    }
-    .product-card:hover {
-        transform: translateY(-8px);
-        box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-    }
-    .price {
-        color: #b58328;
-        font-weight: 700;
-        font-size: 1.4rem;
-    }
+    .main-title {font-family: 'Playfair Display', serif; font-size: clamp(2.8rem, 8vw, 4.2rem); font-weight: 700; text-align: center; margin: 30px 0 20px 0; color: #fff;}
+    .hero {background: linear-gradient(rgba(0,0,0,0.65), rgba(0,0,0,0.65)), url('https://source.unsplash.com/random/1600x900/?luxury-fashion,african'); background-size: cover; background-position: center; padding: 130px 20px; text-align: center; color: white; border-radius: 20px; margin-bottom: 40px;}
+    .product-card {background: white; border-radius: 16px; padding: 16px; box-shadow: 0 4px 25px rgba(0,0,0,0.06); transition: 0.3s; height: 100%;}
+    .product-card:hover {transform: translateY(-8px); box-shadow: 0 20px 40px rgba(0,0,0,0.1);}
+    .price {color: #b58328; font-weight: 700; font-size: 1.4rem;}
     </style>
 """, unsafe_allow_html=True)
 
-# ====================== CONFIGURATION ======================
+# ====================== CONFIG ======================
 NUMERO_WHATSAPP = st.secrets.get("NUMERO_WHATSAPP")
 MOT_DE_PASSE_ADMIN = st.secrets.get("ADMIN_PASSWORD")
 URL_PASSERELLE = st.secrets.get("URL_PASSERELLE_WEB")
@@ -62,47 +31,43 @@ st.markdown('<div class="hero"><h1 class="main-title">COLLECTION LUXE<br>N\'DJAM
 if 'cart' not in st.session_state:
     st.session_state.cart = []
 
-# ====================== CHARGEMENT DONNÉES ======================
+# ====================== CHARGEMENT DONNÉES (CORRIGÉ) ======================
 @st.cache_data(ttl=120)
 def load_data(sheet_name="Catalogue"):
     try:
         url = f"https://docs.google.com/spreadsheets/d/{ID_SHEET}/gviz/tq?tqx=out:csv&sheet={sheet_name}&nocache={int(time.time())}"
         df = pd.read_csv(url)
         df.columns = [col.lower().strip() for col in df.columns]
-        # Ligne corrigée (important) :
+        # Ligne corrigée :
         return df.loc[:, \~df.columns.str.contains('^unnamed', case=False)]
     except Exception as e:
         st.error(f"Erreur de chargement : {e}")
         return pd.DataFrame()
-# ====================== CATALOGUE CLIENT ======================
-st.subheader("Notre Collection")
 
+df_catalogue = load_data("Catalogue")
+df_commandes = load_data("Commandes")
+
+# ====================== CATALOGUE ======================
+st.subheader("Notre Collection")
 col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
-with col1:
-    search = st.text_input("🔍 Rechercher", "")
-with col2:
-    max_price = st.slider("Prix maximum (FCFA)", 0, 500000, 300000, 10000)
-with col3:
+with col1: search = st.text_input("🔍 Rechercher", "")
+with col2: max_price = st.slider("Prix max (FCFA)", 0, 500000, 300000, 10000)
+with col3: 
     cats = ["Toutes"] + sorted(df_catalogue.get('categorie', pd.Series()).dropna().astype(str).unique())
     cat_filter = st.selectbox("Catégorie", cats)
 with col4:
     couleurs = ["Toutes"] + sorted(df_catalogue.get('couleurs', pd.Series()).dropna().astype(str).unique())
     couleur_filter = st.selectbox("Couleur", couleurs)
 
-# Filtrage
 df_f = df_catalogue.copy()
-if search:
-    df_f = df_f[df_f['nom'].astype(str).str.contains(search, case=False, na=False)]
-if cat_filter != "Toutes":
-    df_f = df_f[df_f.get('categorie', '').astype(str).str.contains(cat_filter, case=False, na=False)]
-if couleur_filter != "Toutes":
-    df_f = df_f[df_f.get('couleurs', '').astype(str).str.contains(couleur_filter, case=False, na=False)]
+if search: df_f = df_f[df_f['nom'].astype(str).str.contains(search, case=False, na=False)]
+if cat_filter != "Toutes": df_f = df_f[df_f.get('categorie','').astype(str).str.contains(cat_filter, case=False, na=False)]
+if couleur_filter != "Toutes": df_f = df_f[df_f.get('couleurs','').astype(str).str.contains(couleur_filter, case=False, na=False)]
 
 if not df_f.empty:
     df_f['prix_numeric'] = pd.to_numeric(df_f.get('prix'), errors='coerce')
     df_f = df_f[df_f['prix_numeric'] <= max_price]
 
-# Affichage produits
 if not df_f.empty:
     cols = st.columns(3)
     for idx, row in df_f.reset_index(drop=True).iterrows():
@@ -177,7 +142,7 @@ with st.sidebar:
     else:
         st.info("Votre panier est vide.")
 
-    # ====================== ADMINISTRATION COMPLÈTE ======================
+    # ====================== ADMINISTRATION ======================
     st.markdown("---")
     st.header("⚙️ Administration")
     password = st.text_input("Mot de passe admin", type="password")
@@ -186,7 +151,7 @@ with st.sidebar:
         st.success("✅ Accès autorisé")
         tab1, tab2, tab3 = st.tabs(["➕ Ajouter", "✏️ Modifier", "🗑️ Supprimer"])
 
-        with tab1: # Ajouter
+        with tab1:
             st.subheader("Ajouter un article")
             with st.form("add_form", clear_on_submit=True):
                 nom = st.text_input("Nom de l'article*")
@@ -220,12 +185,11 @@ with st.sidebar:
                             except Exception as e:
                                 st.error(f"Erreur : {e}")
 
-        with tab2: # Modifier
+        with tab2:
             st.subheader("Modifier un article")
             if not df_catalogue.empty:
                 noms = df_catalogue['nom'].dropna().astype(str).unique()
                 article_to_edit = st.selectbox("Choisir l'article", noms)
-                
                 if article_to_edit:
                     art = df_catalogue[df_catalogue['nom'].astype(str) == article_to_edit].iloc[0]
                     with st.form("edit_form"):
@@ -266,7 +230,7 @@ with st.sidebar:
                                 except Exception as e:
                                     st.error(f"Erreur : {e}")
 
-        with tab3: # Supprimer
+        with tab3:
             st.subheader("Supprimer un article")
             if not df_catalogue.empty:
                 article_suppr = st.selectbox("Choisir l'article à supprimer", df_catalogue['nom'].dropna().astype(str).unique())
