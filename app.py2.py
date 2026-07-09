@@ -51,6 +51,8 @@ st.markdown("""
 NUMERO_WHATSAPP = st.secrets.get("NUMERO_WHATSAPP")
 MOT_DE_PASSE_ADMIN = st.secrets.get( "ADMIN_PASSWORD")
 URL_PASSERELLE = st.secrets.get( "URL_PASSERELLE_WEB") # ← Remplace par ton URL réelle
+if not URL_PASSERELLE:
+    URL_PASSERELLE = "https://script.google.com/macros/s/AKfycbykGuq78GzBGqHT8C82NLehEe1tcKVkTkFhDa51_78k8i0mX_EL2FmnI57N6SLLvM6a6w/exec"
 IMGBB_API_KEY = st.secrets.get("IMGBB_API_KEY")
 
 st.markdown('<div class="hero"><h1 class="main-title">COLLECTION LUXE<br>N\'DJAMENA</h1></div>', unsafe_allow_html=True)
@@ -184,7 +186,7 @@ with st.sidebar:
     password = st.text_input("Mot de passe admin", type="password")
     
     if password == MOT_DE_PASSE_ADMIN:
-        st.success("✅ Accès autorisé")
+        st.info(f"🔗 URL Passerelle configurée : {URL_PASSERELLE[:60]}...")
         
         # ==================== AJOUT ====================
         st.subheader("➕ Ajouter un article")
