@@ -239,7 +239,7 @@ with st.sidebar:
     if st.session_state.admin_logged_in:
         tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "➕ Ajouter", "✏️ Modifier", "🗑️ Supprimer"])
 
-        with tab1: # DASHBOARD
+        with tab1:  # DASHBOARD
             st.subheader("📊 Tableau de Bord")
             col1, col2, col3, col4 = st.columns(4)
             
