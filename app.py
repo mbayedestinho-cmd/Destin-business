@@ -326,29 +326,95 @@ with st.sidebar:
                                     time.sleep(1.5)
                                     st.rerun()
 
-        # ====================== MODIFIER & SUPPRIMER ======================
-        # (Vous pouvez garder vos versions précédentes pour ces onglets)
+        # ====================== MODIFIER ======================
         with tab3:
             st.subheader("✏️ Modifier un article")
             if not df_catalogue.empty:
                 noms = df_catalogue['nom'].dropna().astype(str).unique().tolist()
-                article_to_edit = st.selectbox("Article à modifier", noms)
-                # ... (reste de ton code de modification existant) ...
+                article_to_edit = st.selectbox("Article à modifier", noms, key="select_edit")
+
+                # Récupère la ligne actuelle de l'article sélectionné
+                row_edit = df_catalogue[df_catalogue['nom'].astype(str) == article_to_edit].iloc[0]
+
+                with st.form("edit_form"):
+                    col_img1, col_img2 = st.columns([1, 2])
+                    with col_img1:
+                        st.image(row_edit.get('image', ''), width=120, caption="Photo actuelle")
+                    with col_img2:
+                        nouvelle_photo = st.file_uploader(
+                            "Remplacer la photo (optionnel)", type=["jpg", "png", "jpeg"], key="edit_photo"
+                        )
+
+                    nouveau_nom = st.text_input("Nom de l'article", value=str(row_edit.get('nom', '')))
+                    nouveau_prix = st.number_input(
+                        "Prix (FCFA)", min_value=0, step=1000,
+                        value=int(row_edit.get('prix_numeric', 0))
+                    )
+                    nouvelles_tailles = st.text_input(
+                        "Tailles", value=str(row_edit.get('tailles', '') or '')
+                    )
+                    nouvelles_couleurs = st.text_input(
+                        "Couleurs", value=str(row_edit.get('couleurs', '') or '')
+                    )
+                    nouvelle_categorie = st.text_input(
+                        "Catégorie", value=str(row_edit.get('categorie', '') or '')
+                    )
+                    nouveau_stock = st.number_input(
+                        "Stock", min_value=0, value=int(row_edit.get('stock', 0))
+                    )
+
+                    if st.form_submit_button("💾 Enregistrer les modifications"):
+                        with st.spinner("Mise à jour en cours..."):
+                            image_url = row_edit.get('image', '')
+                            if nouvelle_photo is not None:
+                                image_url, err = upload_image_to_imgbb(nouvelle_photo.getvalue())
+                                if err:
+                                    st.error(f"Erreur upload photo : {err}")
+                                    st.stop()
+
+                            payload = {
+                                "action": "modification_article",
+                                "password": MOT_DE_PASSE_ADMIN,
+                                "ancien_nom": article_to_edit,
+                                "nom": nouveau_nom,
+                                "prix": nouveau_prix,
+                                "image": image_url,
+                                "tailles": nouvelles_tailles,
+                                "couleurs": nouvelles_couleurs,
+                                "categorie": nouvelle_categorie,
+                                "stock": nouveau_stock
+                            }
+                            _, err = call_passerelle(payload)
+                            if err:
+                                st.error(f"❌ Erreur lors de la mise à jour : {err}")
+                            else:
+                                st.success("✅ Article mis à jour !")
+                                st.session_state.refresh_token += 1
+                                time.sleep(1.5)
+                                st.rerun()
             else:
                 st.info("Aucun article disponible.")
 
+        # ====================== SUPPRIMER ======================
         with tab4:
             st.subheader("🗑️ Supprimer un article")
             if not df_catalogue.empty:
-                article_suppr = st.selectbox("Article à supprimer", df_catalogue['nom'].dropna().astype(str).unique())
-                if st.button("Supprimer définitivement", type="primary"):
-                    payload = {"action": "suppression_article", "password": MOT_DE_PASSE_ADMIN, "nom": article_suppr}
-                    _, err = call_passerelle(payload)
-                    if err:
-                        st.error(err)
-                    else:
-                        st.success("Article supprimé")
-                        st.session_state.refresh_token += 1
-                        st.rerun()
+                article_suppr = st.selectbox(
+                    "Article à supprimer",
+                    df_catalogue['nom'].dropna().astype(str).unique(),
+                    key="select_delete"
+                )
 
-st.caption("Collection Luxe N'Djamena © 2026")
+                row_suppr = df_catalogue[df_catalogue['nom'].astype(str) == article_suppr].iloc[0]
+                col_prev1, col_prev2 = st.columns([1, 2])
+                with col_prev1:
+                    st.image(row_suppr.get('image', ''), width=120)
+                with col_prev2:
+                    st.write(f"**{article_suppr}**")
+                    st.write(f"Prix : {format_fcfa(row_suppr.get('prix_numeric', 0))}")
+                    st.write(f"Stock : {int(row_suppr.get('stock', 0))} pièce(s)")
+
+                confirmer = st.checkbox("Je confirme vouloir supprimer définitivement cet article", key="confirm_delete")
+
+                if st.button("Supprimer définitivement", type="primary", disabled=not confirmer):
+                    with st.spinner("
