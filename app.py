@@ -417,4 +417,21 @@ with st.sidebar:
                 confirmer = st.checkbox("Je confirme vouloir supprimer définitivement cet article", key="confirm_delete")
 
                 if st.button("Supprimer définitivement", type="primary", disabled=not confirmer):
-                    with st.spinner("
+                    with st.spinner("Suppression en cours..."):
+                        payload = {
+                            "action": "suppression_article",
+                            "password": MOT_DE_PASSE_ADMIN,
+                            "nom": article_suppr
+                        }
+                        _, err = call_passerelle(payload)
+                        if err:
+                            st.error(f"❌ Erreur lors de la suppression : {err}")
+                        else:
+                            st.success("✅ Article supprimé")
+                            st.session_state.refresh_token += 1
+                            time.sleep(1.5)
+                            st.rerun()
+            else:
+                st.info("Aucun article disponible.")
+
+st.caption("Collection Luxe N'Djamena © 2026")
