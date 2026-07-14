@@ -6,6 +6,7 @@ import base64
 import time
 import uuid
 import re
+import unicodedata
 
 st.set_page_config(page_title="Collection Luxe N'Djamena", page_icon="✨", layout="wide")
 
@@ -50,6 +51,18 @@ if 'refresh_token' not in st.session_state:
 def format_fcfa(n):
     return f"{int(n):,} FCFA".replace(",", " ")
 
+def normalize_col(col):
+    """Met en minuscule, retire les espaces et supprime les accents d'un nom de colonne."""
+    col = str(col).lower().strip()
+    col = ''.join(c for c in unicodedata.normalize('NFD', col) if unicodedata.category(c) != 'Mn')
+    return col
+
+def get_unique_values(df, col):
+    """Retourne la liste des valeurs uniques d'une colonne, sans planter si elle est absente."""
+    if df.empty or col not in df.columns:
+        return ["Toutes"]
+    return ["Toutes"] + sorted(df[col].dropna().astype(str).unique())
+
 def upload_image_to_imgbb(file_bytes):
     try:
         b64 = base64.b64encode(file_bytes).decode()
@@ -76,7 +89,7 @@ def load_data(sheet_id, _refresh_token=0):
     try:
         url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=Catalogue"
         df = pd.read_csv(url)
-        df.columns = [col.lower().strip() for col in df.columns]
+        df.columns = [normalize_col(col) for col in df.columns]
         df = df.loc[:, ~df.columns.str.contains('^unnamed', case=False)]
         df = df.dropna(subset=['nom', 'prix'])
         df['prix_numeric'] = pd.to_numeric(df['prix'], errors='coerce').fillna(0)
@@ -97,8 +110,8 @@ with col1:
 with col2:
     min_price, max_price = st.slider("Fourchette de prix (FCFA)", 0, 500000, (0, 300000), 10000)
 
-cats = ["Toutes"] + sorted(df_catalogue['categorie'].dropna().astype(str).unique()) if not df_catalogue.empty else ["Toutes"]
-tailles_list = ["Toutes"] + sorted(df_catalogue['tailles'].dropna().astype(str).unique()) if not df_catalogue.empty else ["Toutes"]
+cats = get_unique_values(df_catalogue, 'categorie')
+tailles_list = get_unique_values(df_catalogue, 'tailles')
 
 with col3:
     cat_filter = st.selectbox("Catégorie", cats)
@@ -112,9 +125,9 @@ df_f = df_catalogue.copy()
 if not df_f.empty:
     if search:
         df_f = df_f[df_f['nom'].astype(str).str.contains(search, case=False, na=False)]
-    if cat_filter != "Toutes":
+    if cat_filter != "Toutes" and 'categorie' in df_f.columns:
         df_f = df_f[df_f['categorie'].astype(str).str.contains(cat_filter, case=False, na=False)]
-    if taille_filter != "Toutes":
+    if taille_filter != "Toutes" and 'tailles' in df_f.columns:
         df_f = df_f[df_f['tailles'].astype(str).str.contains(taille_filter, case=False, na=False)]
 
     df_f = df_f[(df_f['prix_numeric'] >= min_price) & (df_f['prix_numeric'] <= max_price)]
