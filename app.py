@@ -46,6 +46,8 @@ if 'admin_logged_in' not in st.session_state:
     st.session_state.admin_logged_in = False
 if 'refresh_token' not in st.session_state:
     st.session_state.refresh_token = 0
+if 'confirm_delete' not in st.session_state:
+    st.session_state.confirm_delete = False
 
 # ====================== HELPERS ======================
 def format_fcfa(n):
@@ -66,7 +68,7 @@ def get_unique_values(df, col):
 def upload_image_to_imgbb(file_bytes):
     try:
         b64 = base64.b64encode(file_bytes).decode()
-        res = requests.post("https://api.imgbb.com/1/upload", 
+        res = requests.post("https://api.imgbb.com/1/upload",
                            data={"key": IMGBB_API_KEY, "image": b64}, timeout=25)
         if res.status_code != 200:
             return None, "Erreur upload ImgBB"
@@ -84,8 +86,12 @@ def call_passerelle(payload, timeout=20):
         return None, str(e)
 
 # ====================== CHARGEMENT DONNÉES ======================
+# ⚠️ FIX : le paramètre ne doit PAS commencer par "_" (Streamlit ignore les
+# paramètres préfixés par underscore dans le calcul de la clé de cache, donc
+# faire varier refresh_token n'invalidait jamais le cache). En complément,
+# on appelle explicitement load_data.clear() après chaque mutation réussie.
 @st.cache_data(ttl=90, show_spinner=False)
-def load_data(sheet_id, _refresh_token=0):
+def load_data(sheet_id, refresh_token=0):
     try:
         url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=Catalogue"
         df = pd.read_csv(url)
@@ -151,7 +157,7 @@ if not df_f.empty:
             st.markdown(f"""
                 <div class="product-card">
                     <a href="{row.get('image', '')}" target="_blank">
-                        <img src="{row.get('image', '')}" style="width:100%; border-radius:12px; aspect-ratio:1/1; object-fit:cover;" 
+                        <img src="{row.get('image', '')}" style="width:100%; border-radius:12px; aspect-ratio:1/1; object-fit:cover;"
                              onerror="this.src='https://placehold.co/300x300?text=Image+non+disponible';">
                     </a>
                     <h3>{row['nom']}</h3>
@@ -160,7 +166,7 @@ if not df_f.empty:
                 </div>
             """, unsafe_allow_html=True)
 
-            if st.button("🛒 Ajouter au panier" if not en_rupture else "❌ Rupture de stock", 
+            if st.button("🛒 Ajouter au panier" if not en_rupture else "❌ Rupture de stock",
                         key=f"add_{idx}_{row.get('nom')}", disabled=en_rupture):
                 existing = next((item for item in st.session_state.cart if item['nom'] == row['nom']), None)
                 if existing:
@@ -188,7 +194,7 @@ with st.sidebar:
         for item in st.session_state.cart[:]:
             c1, c2, c3 = st.columns([5, 2, 1])
             with c1: st.write(item['nom'])
-            with c2: 
+            with c2:
                 item['quantite'] = st.number_input("Qté", min_value=1, value=item['quantite'], key=f"q_{item['id']}")
             with c3:
                 if st.button("🗑️", key=f"del_{item['id']}"):
@@ -199,7 +205,7 @@ with st.sidebar:
         col_a, col_b = st.columns(2)
         with col_a:
             msg = "Bonjour, voici ma commande :\n\n" + "\n".join(
-                [f"- {item['nom']} × {item['quantite']} = {format_fcfa(item['prix']*item['quantite'])} FCFA" 
+                [f"- {item['nom']} × {item['quantite']} = {format_fcfa(item['prix']*item['quantite'])} FCFA"
                  for item in st.session_state.cart]
             ) + f"\n\nTotal : {format_fcfa(total)} FCFA"
             st.link_button("📱 WhatsApp", f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(msg)}", use_container_width=True)
@@ -242,7 +248,7 @@ with st.sidebar:
         with tab1:  # DASHBOARD
             st.subheader("📊 Tableau de Bord")
             col1, col2, col3, col4 = st.columns(4)
-            
+
             with col1:
                 st.metric("Articles totaux", len(df_catalogue))
             with col2:
@@ -270,9 +276,9 @@ with st.sidebar:
                     orders_df = pd.DataFrame(orders_list)
                     orders_df['date'] = pd.to_datetime(orders_df['date']).dt.strftime("%d/%m/%Y %H:%M")
                     orders_df['total'] = orders_df['total'].apply(format_fcfa)
-                    st.dataframe(orders_df[['date', 'client', 'total', 'articles_count']], 
+                    st.dataframe(orders_df[['date', 'client', 'total', 'articles_count']],
                                use_container_width=True, hide_index=True)
-                    
+
                     csv = orders_df.to_csv(index=False).encode('utf-8')
                     st.download_button("📥 Exporter en CSV", csv, "commandes.csv", "text/csv")
                 else:
@@ -284,7 +290,7 @@ with st.sidebar:
             if not df_catalogue.empty:
                 alerts = df_catalogue[df_catalogue['stock'] < 10].copy()
                 if not alerts.empty:
-                    st.dataframe(alerts[['nom', 'stock', 'prix']].sort_values('stock'), 
+                    st.dataframe(alerts[['nom', 'stock', 'prix']].sort_values('stock'),
                                use_container_width=True)
                 else:
                     st.success("✅ Aucun stock critique")
@@ -322,6 +328,7 @@ with st.sidebar:
                                     st.error(err)
                                 else:
                                     st.success("✅ Article ajouté !")
+                                    load_data.clear()  # 🔧 FIX cache
                                     st.session_state.refresh_token += 1
                                     time.sleep(1.5)
                                     st.rerun()
@@ -389,6 +396,7 @@ with st.sidebar:
                                 st.error(f"❌ Erreur lors de la mise à jour : {err}")
                             else:
                                 st.success("✅ Article mis à jour !")
+                                load_data.clear()  # 🔧 FIX cache
                                 st.session_state.refresh_token += 1
                                 time.sleep(1.5)
                                 st.rerun()
@@ -414,24 +422,41 @@ with st.sidebar:
                     st.write(f"Prix : {format_fcfa(row_suppr.get('prix_numeric', 0))}")
                     st.write(f"Stock : {int(row_suppr.get('stock', 0))} pièce(s)")
 
-                confirmer = st.checkbox("Je confirme vouloir supprimer définitivement cet article", key="confirm_delete")
+                st.warning("⚠️ Cette action est irréversible.")
 
-                if st.button("Supprimer définitivement", type="primary", disabled=not confirmer):
-                    with st.spinner("Suppression en cours..."):
-                        payload = {
-                            "action": "suppression_article",
-                            "password": MOT_DE_PASSE_ADMIN,
-                            "nom": article_suppr
-                        }
-                        _, err = call_passerelle(payload)
-                        if err:
-                            st.error(f"❌ Erreur lors de la suppression : {err}")
-                        else:
-                            st.success("✅ Article supprimé")
-                            st.session_state.refresh_token += 1
-                            time.sleep(1.5)
+                # Réinitialise la confirmation si l'utilisateur change d'article
+                if st.session_state.get("last_delete_target") != article_suppr:
+                    st.session_state.confirm_delete = False
+                    st.session_state.last_delete_target = article_suppr
+
+                if not st.session_state.confirm_delete:
+                    if st.button("🗑️ Supprimer cet article", type="primary", use_container_width=True):
+                        st.session_state.confirm_delete = True
+                        st.rerun()
+                else:
+                    st.error(f"Confirmer la suppression définitive de **{article_suppr}** ?")
+                    col_conf1, col_conf2 = st.columns(2)
+                    with col_conf1:
+                        if st.button("✅ Oui, supprimer", type="primary", use_container_width=True):
+                            with st.spinner("Suppression en cours..."):
+                                payload = {
+                                    "action": "suppression_article",
+                                    "password": MOT_DE_PASSE_ADMIN,
+                                    "nom": article_suppr
+                                }
+                                reponse, err = call_passerelle(payload)
+                                if err or (reponse and reponse.get("status") != "success"):
+                                    st.error(f"❌ Erreur lors de la suppression : {err or reponse.get('message', '')}")
+                                else:
+                                    st.success("✅ Article supprimé !")
+                                    load_data.clear()  # 🔧 FIX cache
+                                    st.session_state.refresh_token += 1
+                                    st.session_state.confirm_delete = False
+                                    time.sleep(1.5)
+                                    st.rerun()
+                    with col_conf2:
+                        if st.button("❌ Annuler", use_container_width=True):
+                            st.session_state.confirm_delete = False
                             st.rerun()
             else:
-                st.info("Aucun article disponible.")
-
-st.caption("Collection Luxe N'Djamena © 2026")
+                st.info("Aucun article disponible
