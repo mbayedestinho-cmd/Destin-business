@@ -459,4 +459,4 @@ with st.sidebar:
                             st.session_state.confirm_delete = False
                             st.rerun()
             else:
-                st.info("Aucun article disponible
+                st.info("Aucun article disponible")
