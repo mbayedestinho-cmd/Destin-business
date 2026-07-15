@@ -231,14 +231,11 @@ with st.sidebar:
                     warnings = (reponse or {}).get("stock_warnings", [])
                     if warnings:
                         st.warning("⚠️ Stock insuffisant pour : " + ", ".join(warnings))
-                    st.success("✅ Commande enregistrée ! Redirection vers WhatsApp...")
+                    st.success("✅ Commande enregistrée ! Cliquez ci-dessous pour l'envoyer sur WhatsApp 👇")
                     load_data.clear()  # le stock a été décrémenté côté serveur
                     st.session_state.cart = []
                     st.session_state.refresh_token += 1
-                    # Redirection automatique vers WhatsApp (fonctionne dans la plupart des navigateurs)
-                    st.markdown(f'<meta http-equiv="refresh" content="1; url={wa_url}">', unsafe_allow_html=True)
-                    st.link_button("📱 Cliquez ici si la redirection ne s'est pas faite", wa_url, use_container_width=True)
-                    time.sleep(2)
+                    st.link_button("📱 Envoyer la confirmation sur WhatsApp", wa_url, use_container_width=True, type="primary")
     else:
         header_placeholder.header("🛍️ Mon Panier")
         st.info("Votre panier est vide.")
