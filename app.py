@@ -107,6 +107,17 @@ def load_data(sheet_id, refresh_token=0):
 
 df_catalogue = load_data(ID_SHEET, st.session_state.refresh_token)
 
+# ====================== 🔧 DEBUG TEMPORAIRE — à retirer une fois le problème résolu ======================
+with st.expander("🔧 DEBUG — Diagnostic données (à retirer après résolution)", expanded=False):
+    st.write("Colonnes détectées après normalisation :", df_catalogue.columns.tolist())
+    st.write("Aperçu des données (5 premières lignes) :")
+    st.dataframe(df_catalogue.head())
+    if 'stock' in df_catalogue.columns:
+        st.write("Valeurs de stock trouvées :", df_catalogue['stock'].tolist())
+    else:
+        st.error("⚠️ Colonne 'stock' introuvable après normalisation — vérifie l'en-tête exact dans ton Google Sheet.")
+# ====================== FIN DEBUG ======================
+
 # ====================== FILTRES ======================
 st.subheader("Notre Collection")
 col1, col2, col3, col4, col5 = st.columns([2.5, 1.8, 1.5, 1.5, 1.5])
@@ -323,14 +334,16 @@ with st.sidebar:
                                     "tailles": tailles, "couleurs": couleurs,
                                     "categorie": categorie, "stock": stock
                                 }
-                                _, err = call_passerelle(payload)
+                                reponse, err = call_passerelle(payload)
+                                st.write("🔧 DEBUG — payload envoyé :", payload)
+                                st.write("🔧 DEBUG — réponse brute :", reponse, "| erreur :", err)
                                 if err:
                                     st.error(err)
                                 else:
                                     st.success("✅ Article ajouté !")
                                     load_data.clear()  # 🔧 FIX cache
                                     st.session_state.refresh_token += 1
-                                    time.sleep(1.5)
+                                    time.sleep(3)
                                     st.rerun()
 
         # ====================== MODIFIER ======================
@@ -391,14 +404,16 @@ with st.sidebar:
                                 "categorie": nouvelle_categorie,
                                 "stock": nouveau_stock
                             }
-                            _, err = call_passerelle(payload)
+                            reponse, err = call_passerelle(payload)
+                            st.write("🔧 DEBUG — payload envoyé :", payload)
+                            st.write("🔧 DEBUG — réponse brute :", reponse, "| erreur :", err)
                             if err:
                                 st.error(f"❌ Erreur lors de la mise à jour : {err}")
                             else:
                                 st.success("✅ Article mis à jour !")
                                 load_data.clear()  # 🔧 FIX cache
                                 st.session_state.refresh_token += 1
-                                time.sleep(1.5)
+                                time.sleep(3)
                                 st.rerun()
             else:
                 st.info("Aucun article disponible.")
@@ -445,6 +460,8 @@ with st.sidebar:
                                     "nom": article_suppr
                                 }
                                 reponse, err = call_passerelle(payload)
+                                st.write("🔧 DEBUG — payload envoyé :", payload)
+                                st.write("🔧 DEBUG — réponse brute :", reponse, "| erreur :", err)
                                 if err or (reponse and reponse.get("status") != "success"):
                                     st.error(f"❌ Erreur lors de la suppression : {err or reponse.get('message', '')}")
                                 else:
@@ -452,11 +469,11 @@ with st.sidebar:
                                     load_data.clear()  # 🔧 FIX cache
                                     st.session_state.refresh_token += 1
                                     st.session_state.confirm_delete = False
-                                    time.sleep(1.5)
+                                    time.sleep(3)
                                     st.rerun()
                     with col_conf2:
                         if st.button("❌ Annuler", use_container_width=True):
                             st.session_state.confirm_delete = False
                             st.rerun()
             else:
-                st.info("Aucun article disponible")
+                st.info("Aucun article disponible.")
