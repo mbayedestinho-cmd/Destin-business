@@ -187,12 +187,9 @@ else:
 
 # ====================== PANIER ======================
 with st.sidebar:
-    nb_articles = sum(item['quantite'] for item in st.session_state.cart)
-    st.header(f"🛍️ Mon Panier ({nb_articles})" if nb_articles else "🛍️ Mon Panier")
+    header_placeholder = st.empty()
+    total_placeholder = st.empty()
     if st.session_state.cart:
-        total = sum(item['prix'] * item['quantite'] for item in st.session_state.cart)
-        st.success(f"**Total : {format_fcfa(total)}**")
-
         for item in st.session_state.cart[:]:
             c1, c2, c3 = st.columns([5, 2, 1])
             with c1: st.write(item['nom'])
@@ -202,6 +199,12 @@ with st.sidebar:
                 if st.button("🗑️", key=f"del_{item['id']}"):
                     st.session_state.cart = [i for i in st.session_state.cart if i['id'] != item['id']]
                     st.rerun()
+
+        # Recalcul APRÈS mise à jour des quantités par les number_input ci-dessus
+        nb_articles = sum(item['quantite'] for item in st.session_state.cart)
+        total = sum(item['prix'] * item['quantite'] for item in st.session_state.cart)
+        header_placeholder.header(f"🛍️ Mon Panier ({nb_articles})")
+        total_placeholder.success(f"**Total : {format_fcfa(total)}**")
 
         st.markdown("---")
         col_a, col_b = st.columns(2)
@@ -231,6 +234,7 @@ with st.sidebar:
                         time.sleep(3)
                         st.rerun()
     else:
+        header_placeholder.header("🛍️ Mon Panier")
         st.info("Votre panier est vide.")
 
     # ====================== ADMINISTRATION AVANCÉE ======================
