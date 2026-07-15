@@ -107,17 +107,6 @@ def load_data(sheet_id, refresh_token=0):
 
 df_catalogue = load_data(ID_SHEET, st.session_state.refresh_token)
 
-# ====================== 🔧 DEBUG TEMPORAIRE — à retirer une fois le problème résolu ======================
-with st.expander("🔧 DEBUG — Diagnostic données (à retirer après résolution)", expanded=False):
-    st.write("Colonnes détectées après normalisation :", df_catalogue.columns.tolist())
-    st.write("Aperçu des données (5 premières lignes) :")
-    st.dataframe(df_catalogue.head())
-    if 'stock' in df_catalogue.columns:
-        st.write("Valeurs de stock trouvées :", df_catalogue['stock'].tolist())
-    else:
-        st.error("⚠️ Colonne 'stock' introuvable après normalisation — vérifie l'en-tête exact dans ton Google Sheet.")
-# ====================== FIN DEBUG ======================
-
 # ====================== FILTRES ======================
 st.subheader("Notre Collection")
 col1, col2, col3, col4, col5 = st.columns([2.5, 1.8, 1.5, 1.5, 1.5])
@@ -232,8 +221,6 @@ with st.sidebar:
                         "total": total
                     }
                     reponse, err = call_passerelle(payload)
-                    st.write("🔧 DEBUG — payload envoyé :", payload)
-                    st.write("🔧 DEBUG — réponse brute :", reponse, "| erreur :", err)
                     if err or not reponse or reponse.get("status") != "success":
                         st.error(f"❌ Erreur lors de l'enregistrement : {err or (reponse or {}).get('message', 'réponse invalide')}")
                     else:
@@ -338,15 +325,13 @@ with st.sidebar:
                                     "categorie": categorie, "stock": stock
                                 }
                                 reponse, err = call_passerelle(payload)
-                                st.write("🔧 DEBUG — payload envoyé :", payload)
-                                st.write("🔧 DEBUG — réponse brute :", reponse, "| erreur :", err)
                                 if err or not reponse or reponse.get("status") != "success":
                                     st.error(f"❌ Erreur : {err or (reponse or {}).get('message', 'réponse invalide')}")
                                 else:
                                     st.success("✅ Article ajouté !")
                                     load_data.clear()  # 🔧 FIX cache
                                     st.session_state.refresh_token += 1
-                                    time.sleep(3)
+                                    time.sleep(1.5)
                                     st.rerun()
 
         # ====================== MODIFIER ======================
@@ -408,15 +393,13 @@ with st.sidebar:
                                 "stock": nouveau_stock
                             }
                             reponse, err = call_passerelle(payload)
-                            st.write("🔧 DEBUG — payload envoyé :", payload)
-                            st.write("🔧 DEBUG — réponse brute :", reponse, "| erreur :", err)
                             if err or not reponse or reponse.get("status") != "success":
                                 st.error(f"❌ Erreur lors de la mise à jour : {err or (reponse or {}).get('message', 'réponse invalide')}")
                             else:
                                 st.success("✅ Article mis à jour !")
                                 load_data.clear()  # 🔧 FIX cache
                                 st.session_state.refresh_token += 1
-                                time.sleep(3)
+                                time.sleep(1.5)
                                 st.rerun()
             else:
                 st.info("Aucun article disponible.")
@@ -463,16 +446,14 @@ with st.sidebar:
                                     "nom": article_suppr
                                 }
                                 reponse, err = call_passerelle(payload)
-                                st.write("🔧 DEBUG — payload envoyé :", payload)
-                                st.write("🔧 DEBUG — réponse brute :", reponse, "| erreur :", err)
-                                if err or (reponse and reponse.get("status") != "success"):
-                                    st.error(f"❌ Erreur lors de la suppression : {err or reponse.get('message', '')}")
+                                if err or not reponse or reponse.get("status") != "success":
+                                    st.error(f"❌ Erreur lors de la suppression : {err or (reponse or {}).get('message', '')}")
                                 else:
                                     st.success("✅ Article supprimé !")
                                     load_data.clear()  # 🔧 FIX cache
                                     st.session_state.refresh_token += 1
                                     st.session_state.confirm_delete = False
-                                    time.sleep(3)
+                                    time.sleep(1.5)
                                     st.rerun()
                     with col_conf2:
                         if st.button("❌ Annuler", use_container_width=True):
