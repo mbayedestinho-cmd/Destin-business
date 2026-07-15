@@ -26,19 +26,18 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ====================== CONFIG ======================
-NUMERO_WHATSAPP_RAW = st.secrets.get("NUMERO_WHATSAPP", "")
-NUMERO_WHATSAPP = re.sub(r"\D", "", NUMERO_WHATSAPP_RAW)
-
-MOT_DE_PASSE_ADMIN = st.secrets.get("ADMIN_PASSWORD", "")
+# Seuls les identifiants "techniques" (indispensables pour se connecter à ton
+# Google Sheet et à ImgBB) restent dans les secrets Streamlit. Le mot de passe
+# admin, le numéro WhatsApp et le nom de la boutique sont maintenant stockés
+# dans l'onglet "Config" de ton Google Sheet, et modifiables directement
+# depuis l'appli (onglet ⚙️ Paramètres de l'admin).
 URL_PASSERELLE = st.secrets.get("URL_PASSERELLE_WEB", "")
 ID_SHEET = st.secrets.get("ID_DU_SHEET", "").strip()
 IMGBB_API_KEY = st.secrets.get("IMGBB_API_KEY", "")
 
-if not all([NUMERO_WHATSAPP, URL_PASSERELLE, ID_SHEET, MOT_DE_PASSE_ADMIN, IMGBB_API_KEY]):
+if not all([URL_PASSERELLE, ID_SHEET, IMGBB_API_KEY]):
     st.error("⚠️ Configuration incomplète dans les secrets Streamlit.")
     st.stop()
-
-st.markdown('<div class="hero"><h1 class="main-title">COLLECTION LUXE<br>N\'DJAMENA</h1></div>', unsafe_allow_html=True)
 
 # ====================== SESSION STATE ======================
 if 'cart' not in st.session_state:
@@ -49,6 +48,8 @@ if 'refresh_token' not in st.session_state:
     st.session_state.refresh_token = 0
 if 'confirm_delete' not in st.session_state:
     st.session_state.confirm_delete = False
+if 'admin_password' not in st.session_state:
+    st.session_state.admin_password = ""
 
 # ====================== HELPERS ======================
 def format_fcfa(n):
@@ -85,6 +86,23 @@ def call_passerelle(payload, timeout=20):
         return r.json(), None
     except Exception as e:
         return None, str(e)
+
+# ====================== CHARGEMENT CONFIG (nom boutique / whatsapp) ======================
+@st.cache_data(ttl=90, show_spinner=False)
+def load_config(refresh_token=0):
+    reponse, err = call_passerelle({"action": "get_config"})
+    if err or not reponse or reponse.get("status") != "success":
+        return {"nom_boutique": "Collection Luxe N'Djamena", "whatsapp": ""}
+    return {
+        "nom_boutique": reponse.get("nom_boutique") or "Collection Luxe N'Djamena",
+        "whatsapp": reponse.get("whatsapp") or ""
+    }
+
+config = load_config(st.session_state.get("refresh_token", 0))
+NOM_BOUTIQUE = config["nom_boutique"]
+NUMERO_WHATSAPP = re.sub(r"\D", "", config["whatsapp"])
+
+st.markdown(f'<div class="hero"><h1 class="main-title">{NOM_BOUTIQUE}</h1></div>', unsafe_allow_html=True)
 
 # ====================== CHARGEMENT DONNÉES ======================
 # ⚠️ FIX : le paramètre ne doit PAS commencer par "_" (Streamlit ignore les
@@ -219,7 +237,7 @@ with st.sidebar:
             with st.spinner("Enregistrement..."):
                 payload = {
                     "action": "nouvelle_commande",
-                    "password": MOT_DE_PASSE_ADMIN,
+                    "password": st.session_state.admin_password,
                     "client_nom": "Client Site Web",
                     "articles": st.session_state.cart,
                     "total": total
@@ -250,14 +268,17 @@ with st.sidebar:
         pwd = st.text_input("Mot de passe admin", type="password", key="admin_input")
 
         if pwd:
-            if pwd == MOT_DE_PASSE_ADMIN:
+            verif, err = call_passerelle({"action": "connexion_admin", "password": pwd})
+            if not err and verif and verif.get("status") == "success":
                 st.session_state.admin_logged_in = True
+                st.session_state.admin_password = pwd
             else:
                 st.error("❌ Mot de passe incorrect")
                 st.session_state.admin_logged_in = False
+                st.session_state.admin_password = ""
 
     if st.session_state.admin_logged_in:
-        tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "➕ Ajouter", "✏️ Modifier", "🗑️ Supprimer"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Dashboard", "➕ Ajouter", "✏️ Modifier", "🗑️ Supprimer", "⚙️ Paramètres"])
 
         with tab1:  # DASHBOARD
             st.subheader("📊 Tableau de Bord")
@@ -270,7 +291,7 @@ with st.sidebar:
                 st.metric("Stock faible (< 5)", low_stock)
 
             with col3:
-                stats_payload = {"action": "get_stats", "password": MOT_DE_PASSE_ADMIN}
+                stats_payload = {"action": "get_stats", "password": st.session_state.admin_password}
                 stats, _ = call_passerelle(stats_payload)
                 total_sales = stats.get("total_sales", 0) if stats else 0
                 st.metric("CA Total", format_fcfa(total_sales))
@@ -281,7 +302,7 @@ with st.sidebar:
 
             st.markdown("---")
             st.subheader("📋 Dernières Commandes")
-            orders_payload = {"action": "get_orders", "password": MOT_DE_PASSE_ADMIN, "limit": 15}
+            orders_payload = {"action": "get_orders", "password": st.session_state.admin_password, "limit": 15}
             orders_data, err = call_passerelle(orders_payload)
 
             if orders_data and orders_data.get("status") == "success":
@@ -332,7 +353,7 @@ with st.sidebar:
                             else:
                                 payload = {
                                     "action": "ajout_article",
-                                    "password": MOT_DE_PASSE_ADMIN,
+                                    "password": st.session_state.admin_password,
                                     "nom": nom, "prix": prix, "image": img_url,
                                     "tailles": tailles, "couleurs": couleurs,
                                     "categorie": categorie, "stock": stock
@@ -395,7 +416,7 @@ with st.sidebar:
 
                             payload = {
                                 "action": "modification_article",
-                                "password": MOT_DE_PASSE_ADMIN,
+                                "password": st.session_state.admin_password,
                                 "ancien_nom": article_to_edit,
                                 "nom": nouveau_nom,
                                 "prix": nouveau_prix,
@@ -455,7 +476,7 @@ with st.sidebar:
                             with st.spinner("Suppression en cours..."):
                                 payload = {
                                     "action": "suppression_article",
-                                    "password": MOT_DE_PASSE_ADMIN,
+                                    "password": st.session_state.admin_password,
                                     "nom": article_suppr
                                 }
                                 reponse, err = call_passerelle(payload)
@@ -474,3 +495,69 @@ with st.sidebar:
                             st.rerun()
             else:
                 st.info("Aucun article disponible.")
+
+        # ====================== PARAMÈTRES ======================
+        with tab5:
+            st.subheader("⚙️ Paramètres de la boutique")
+            st.caption("Ces réglages sont enregistrés dans ton Google Sheet — plus besoin de toucher au code.")
+
+            with st.form("form_nom_boutique"):
+                st.markdown("**Nom de la boutique**")
+                nouveau_nom_boutique = st.text_input("Nom affiché en haut de l'appli", value=NOM_BOUTIQUE)
+                if st.form_submit_button("💾 Enregistrer le nom"):
+                    reponse, err = call_passerelle({
+                        "action": "modifier_config",
+                        "password": st.session_state.admin_password,
+                        "nouveau_nom_boutique": nouveau_nom_boutique
+                    })
+                    if err or not reponse or reponse.get("status") != "success":
+                        st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
+                    else:
+                        st.success("✅ Nom de la boutique mis à jour !")
+                        load_config.clear()
+                        time.sleep(1.2)
+                        st.rerun()
+
+            st.markdown("---")
+            with st.form("form_whatsapp"):
+                st.markdown("**Numéro WhatsApp**")
+                nouveau_whatsapp = st.text_input(
+                    "Numéro (avec indicatif pays, ex : 23566000000)",
+                    value=config["whatsapp"]
+                )
+                if st.form_submit_button("💾 Enregistrer le numéro"):
+                    reponse, err = call_passerelle({
+                        "action": "modifier_config",
+                        "password": st.session_state.admin_password,
+                        "nouveau_whatsapp": re.sub(r"\D", "", nouveau_whatsapp)
+                    })
+                    if err or not reponse or reponse.get("status") != "success":
+                        st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
+                    else:
+                        st.success("✅ Numéro WhatsApp mis à jour !")
+                        load_config.clear()
+                        time.sleep(1.2)
+                        st.rerun()
+
+            st.markdown("---")
+            with st.form("form_mot_de_passe"):
+                st.markdown("**Mot de passe admin**")
+                nouveau_mdp = st.text_input("Nouveau mot de passe", type="password")
+                confirmation_mdp = st.text_input("Confirmer le nouveau mot de passe", type="password")
+                if st.form_submit_button("💾 Changer le mot de passe"):
+                    if not nouveau_mdp:
+                        st.warning("Le mot de passe ne peut pas être vide.")
+                    elif nouveau_mdp != confirmation_mdp:
+                        st.warning("Les deux mots de passe ne correspondent pas.")
+                    else:
+                        reponse, err = call_passerelle({
+                            "action": "modifier_config",
+                            "password": st.session_state.admin_password,
+                            "nouveau_mot_de_passe": nouveau_mdp
+                        })
+                        if err or not reponse or reponse.get("status") != "success":
+                            st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
+                        else:
+                            st.success("✅ Mot de passe mis à jour ! Reconnecte-toi avec le nouveau mot de passe la prochaine fois.")
+                            st.session_state.admin_password = nouveau_mdp
+                            time.sleep(1.5)
