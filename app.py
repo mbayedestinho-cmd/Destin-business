@@ -16,6 +16,59 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Poppins:wght@300;400;500&display=swap');
     .main-title {font-family: 'Playfair Display', serif; font-size: clamp(2.8rem, 8vw, 4.2rem); font-weight: 700; text-align: center; margin: 30px 0 20px 0; color: #fff;}
     .hero {background: linear-gradient(135deg, #1a1a2e 0%, #3a2a1a 45%, #b58328 100%); padding: 130px 20px; text-align: center; color: white; border-radius: 20px; margin-bottom: 40px;}
+
+    /* ---- Bannière logo pleine largeur ---- */
+    .hero-banner {
+        position: relative;
+        width: 100%;
+        height: 340px;
+        border-radius: 24px;
+        overflow: hidden;
+        margin-bottom: 40px;
+        box-shadow: 0 15px 45px rgba(0,0,0,0.35);
+    }
+    .hero-banner img.hero-bg {
+        position: absolute;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+        object-fit: cover;
+        object-position: center 25%;
+        filter: brightness(0.9);
+    }
+    .hero-banner::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, rgba(15,10,5,0.15) 0%, rgba(15,10,5,0.55) 65%, rgba(15,10,5,0.92) 100%);
+    }
+    .hero-banner .hero-content {
+        position: absolute;
+        bottom: 0; left: 0; right: 0;
+        padding: 30px 24px 26px 24px;
+        text-align: center;
+        z-index: 2;
+    }
+    .hero-banner .hero-content h1 {
+        font-family: 'Playfair Display', serif;
+        font-weight: 700;
+        font-size: clamp(2.2rem, 6vw, 3.6rem);
+        color: #fff;
+        margin: 0;
+        letter-spacing: 0.5px;
+        text-shadow: 0 4px 18px rgba(0,0,0,0.6);
+    }
+    .hero-banner .hero-content p {
+        font-family: 'Poppins', sans-serif;
+        font-weight: 300;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        font-size: 0.8rem;
+        color: #e8c98a;
+        margin: 8px 0 0 0;
+    }
+    @media (max-width: 640px) {
+        .hero-banner { height: 260px; border-radius: 18px; }
+    }
     .product-card {background: white; border-radius: 16px; padding: 16px; box-shadow: 0 4px 25px rgba(0,0,0,0.06); transition: 0.3s; height: 100%; color: #1a1a1a;}
     .product-card h3 {color: #1a1a1a; margin: 12px 0 6px 0;}
     .product-card:hover {transform: translateY(-8px); box-shadow: 0 20px 40px rgba(0,0,0,0.1);}
@@ -106,7 +159,13 @@ LOGO_URL = config.get("logo") or ""
 
 if LOGO_URL:
     st.markdown(
-        f'<div class="hero"><img src="{LOGO_URL}" style="max-height:110px; margin-bottom:18px;"><h1 class="main-title">{NOM_BOUTIQUE}</h1></div>',
+        f'''<div class="hero-banner">
+                <img class="hero-bg" src="{LOGO_URL}">
+                <div class="hero-content">
+                    <h1>{NOM_BOUTIQUE}</h1>
+                    <p>Élégance &amp; Raffinement</p>
+                </div>
+            </div>''',
         unsafe_allow_html=True
     )
 else:
