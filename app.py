@@ -320,7 +320,15 @@ with st.sidebar:
                     load_data.clear()  # le stock a été décrémenté côté serveur
                     st.session_state.cart = []
                     st.session_state.refresh_token += 1
-                    st.link_button("📱 Envoyer la confirmation sur WhatsApp", wa_url, use_container_width=True, type="primary")
+                    st.markdown(
+                        f'''<a href="{wa_url}" target="_blank" rel="noopener"
+                                style="display:block; text-align:center; background:#25D366; color:white;
+                                       font-weight:600; padding:12px 16px; border-radius:8px;
+                                       text-decoration:none; margin-top:8px;">
+                                📱 Envoyer la confirmation sur WhatsApp
+                            </a>''',
+                        unsafe_allow_html=True
+                    )
     else:
         header_placeholder.header("🛍️ Mon Panier")
         st.info("Votre panier est vide.")
