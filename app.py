@@ -232,11 +232,14 @@ with st.sidebar:
                         "total": total
                     }
                     reponse, err = call_passerelle(payload)
-                    if err or reponse.get("status") != "success":
-                        st.error("❌ Erreur lors de l'enregistrement")
+                    st.write("🔧 DEBUG — payload envoyé :", payload)
+                    st.write("🔧 DEBUG — réponse brute :", reponse, "| erreur :", err)
+                    if err or not reponse or reponse.get("status") != "success":
+                        st.error(f"❌ Erreur lors de l'enregistrement : {err or (reponse or {}).get('message', 'réponse invalide')}")
                     else:
                         st.success("✅ Commande enregistrée avec succès !")
                         st.session_state.cart = []
+                        time.sleep(3)
                         st.rerun()
     else:
         st.info("Votre panier est vide.")
@@ -337,8 +340,8 @@ with st.sidebar:
                                 reponse, err = call_passerelle(payload)
                                 st.write("🔧 DEBUG — payload envoyé :", payload)
                                 st.write("🔧 DEBUG — réponse brute :", reponse, "| erreur :", err)
-                                if err:
-                                    st.error(err)
+                                if err or not reponse or reponse.get("status") != "success":
+                                    st.error(f"❌ Erreur : {err or (reponse or {}).get('message', 'réponse invalide')}")
                                 else:
                                     st.success("✅ Article ajouté !")
                                     load_data.clear()  # 🔧 FIX cache
@@ -407,8 +410,8 @@ with st.sidebar:
                             reponse, err = call_passerelle(payload)
                             st.write("🔧 DEBUG — payload envoyé :", payload)
                             st.write("🔧 DEBUG — réponse brute :", reponse, "| erreur :", err)
-                            if err:
-                                st.error(f"❌ Erreur lors de la mise à jour : {err}")
+                            if err or not reponse or reponse.get("status") != "success":
+                                st.error(f"❌ Erreur lors de la mise à jour : {err or (reponse or {}).get('message', 'réponse invalide')}")
                             else:
                                 st.success("✅ Article mis à jour !")
                                 load_data.clear()  # 🔧 FIX cache
