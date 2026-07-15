@@ -240,17 +240,21 @@ with st.sidebar:
         header_placeholder.header("🛍️ Mon Panier")
         st.info("Votre panier est vide.")
 
-    # ====================== ADMINISTRATION AVANCÉE ======================
-    st.markdown("---")
-    st.header("⚙️ Administration")
-    pwd = st.text_input("Mot de passe admin", type="password", key="admin_input")
+    # ====================== ADMINISTRATION AVANCÉE (cachée aux clients) ======================
+    # Section visible uniquement si l'URL contient ?admin=1, ou une fois déjà connecté.
+    show_admin_section = st.query_params.get("admin", "") == "1" or st.session_state.admin_logged_in
 
-    if pwd:
-        if pwd == MOT_DE_PASSE_ADMIN:
-            st.session_state.admin_logged_in = True
-        else:
-            st.error("❌ Mot de passe incorrect")
-            st.session_state.admin_logged_in = False
+    if show_admin_section:
+        st.markdown("---")
+        st.header("⚙️ Administration")
+        pwd = st.text_input("Mot de passe admin", type="password", key="admin_input")
+
+        if pwd:
+            if pwd == MOT_DE_PASSE_ADMIN:
+                st.session_state.admin_logged_in = True
+            else:
+                st.error("❌ Mot de passe incorrect")
+                st.session_state.admin_logged_in = False
 
     if st.session_state.admin_logged_in:
         tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "➕ Ajouter", "✏️ Modifier", "🗑️ Supprimer"])
