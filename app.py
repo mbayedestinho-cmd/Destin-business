@@ -92,17 +92,25 @@ def call_passerelle(payload, timeout=20):
 def load_config(refresh_token=0):
     reponse, err = call_passerelle({"action": "get_config"})
     if err or not reponse or reponse.get("status") != "success":
-        return {"nom_boutique": "Collection Luxe N'Djamena", "whatsapp": ""}
+        return {"nom_boutique": "Collection Luxe N'Djamena", "whatsapp": "", "logo": ""}
     return {
         "nom_boutique": reponse.get("nom_boutique") or "Collection Luxe N'Djamena",
-        "whatsapp": reponse.get("whatsapp") or ""
+        "whatsapp": reponse.get("whatsapp") or "",
+        "logo": reponse.get("logo") or ""
     }
 
 config = load_config(st.session_state.get("refresh_token", 0))
 NOM_BOUTIQUE = config["nom_boutique"]
 NUMERO_WHATSAPP = re.sub(r"\D", "", str(config.get("whatsapp") or ""))
+LOGO_URL = config.get("logo") or ""
 
-st.markdown(f'<div class="hero"><h1 class="main-title">{NOM_BOUTIQUE}</h1></div>', unsafe_allow_html=True)
+if LOGO_URL:
+    st.markdown(
+        f'<div class="hero"><img src="{LOGO_URL}" style="max-height:110px; margin-bottom:18px;"><h1 class="main-title">{NOM_BOUTIQUE}</h1></div>',
+        unsafe_allow_html=True
+    )
+else:
+    st.markdown(f'<div class="hero"><h1 class="main-title">{NOM_BOUTIQUE}</h1></div>', unsafe_allow_html=True)
 
 # ====================== CHARGEMENT DONNÉES ======================
 # ⚠️ FIX : le paramètre ne doit PAS commencer par "_" (Streamlit ignore les
@@ -514,6 +522,32 @@ with st.sidebar:
                         st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
                     else:
                         st.success("✅ Nom de la boutique mis à jour !")
+                        load_config.clear()
+                        time.sleep(1.2)
+                        st.rerun()
+
+            st.markdown("---")
+            st.markdown("**Logo de la boutique**")
+            if LOGO_URL:
+                st.image(LOGO_URL, width=140, caption="Logo actuel")
+            nouveau_logo_fichier = st.file_uploader(
+                "Choisir une nouvelle image de logo", type=["png", "jpg", "jpeg", "webp"], key="upload_logo"
+            )
+            if st.button("💾 Enregistrer le logo", disabled=nouveau_logo_fichier is None):
+                with st.spinner("Envoi de l'image..."):
+                    url_logo, err_img = upload_image_to_imgbb(nouveau_logo_fichier.getvalue())
+                if err_img or not url_logo:
+                    st.error(f"❌ Erreur lors de l'envoi de l'image : {err_img or 'inconnue'}")
+                else:
+                    reponse, err = call_passerelle({
+                        "action": "modifier_config",
+                        "password": st.session_state.admin_password,
+                        "nouveau_logo": url_logo
+                    })
+                    if err or not reponse or reponse.get("status") != "success":
+                        st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
+                    else:
+                        st.success("✅ Logo mis à jour !")
                         load_config.clear()
                         time.sleep(1.2)
                         st.rerun()
