@@ -386,11 +386,56 @@ with st.sidebar:
                     orders_df = pd.DataFrame(orders_list)
                     orders_df['date'] = pd.to_datetime(orders_df['date']).dt.strftime("%d/%m/%Y %H:%M")
                     orders_df['total'] = orders_df['total'].apply(format_fcfa)
-                    st.dataframe(orders_df[['date', 'client', 'total', 'articles_count']],
+                    # 🆕 id_commande peut être vide pour les commandes créées avant la mise à jour du script
+                    colonnes_affichees = ['date', 'client', 'total', 'articles_count', 'statut']
+                    if 'id_commande' in orders_df.columns:
+                        colonnes_affichees.insert(0, 'id_commande')
+                    st.dataframe(orders_df[colonnes_affichees],
                                use_container_width=True, hide_index=True)
 
                     csv = orders_df.to_csv(index=False).encode('utf-8')
                     st.download_button("📥 Exporter en CSV", csv, "commandes.csv", "text/csv")
+
+                    # ====================== 🆕 CHANGER LE STATUT D'UNE COMMANDE ======================
+                    st.markdown("---")
+                    st.markdown("**🔄 Changer le statut d'une commande**")
+
+                    def _libelle_commande(o):
+                        ref = o.get("id_commande") or "(sans id — ancienne commande)"
+                        return f"{ref} — {o.get('client', '')} — {format_fcfa(o.get('total', 0))} — {o.get('statut', '')}"
+
+                    commande_choisie = st.selectbox(
+                        "Commande",
+                        options=list(range(len(orders_list))),
+                        format_func=lambda i: _libelle_commande(orders_list[i]),
+                        key="select_commande_statut"
+                    )
+                    nouveau_statut = st.selectbox(
+                        "Nouveau statut",
+                        ["En cours", "Payé", "Livré", "Annulé"],
+                        key="select_nouveau_statut"
+                    )
+                    if st.button("💾 Mettre à jour le statut", key="btn_maj_statut"):
+                        commande_cible = orders_list[commande_choisie]
+                        payload_statut = {
+                            "action": "modifier_statut_commande",
+                            "password": st.session_state.admin_password,
+                            "nouveau_statut": nouveau_statut
+                        }
+                        # Priorité à l'id_commande ; sinon on retombe sur la date exacte
+                        # (utile pour les commandes créées avant l'ajout de l'id)
+                        if commande_cible.get("id_commande"):
+                            payload_statut["id_commande"] = commande_cible["id_commande"]
+                        else:
+                            payload_statut["date"] = commande_cible.get("date")
+
+                        reponse, err = call_passerelle(payload_statut)
+                        if err or not reponse or reponse.get("status") != "success":
+                            st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
+                        else:
+                            st.success("✅ Statut mis à jour !")
+                            time.sleep(1.2)
+                            st.rerun()
                 else:
                     st.info("Aucune commande enregistrée.")
             else:
@@ -493,6 +538,10 @@ with st.sidebar:
                                 "action": "modification_article",
                                 "password": st.session_state.admin_password,
                                 "ancien_nom": article_to_edit,
+                                # 🆕 si la colonne "id" existe dans le Google Sheet (ajoutée par la
+                                # mise à jour du script), on la transmet pour un matching fiable ;
+                                # sinon le script retombe automatiquement sur "ancien_nom"
+                                "id": str(row_edit.get('id', '') or ''),
                                 "nom": nouveau_nom,
                                 "prix": nouveau_prix,
                                 "image": image_url,
@@ -552,7 +601,9 @@ with st.sidebar:
                                 payload = {
                                     "action": "suppression_article",
                                     "password": st.session_state.admin_password,
-                                    "nom": article_suppr
+                                    "nom": article_suppr,
+                                    # 🆕 idem : transmet l'id si disponible, sinon fallback sur "nom"
+                                    "id": str(row_suppr.get('id', '') or '')
                                 }
                                 reponse, err = call_passerelle(payload)
                                 if err or not reponse or reponse.get("status") != "success":
