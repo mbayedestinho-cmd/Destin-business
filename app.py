@@ -208,32 +208,37 @@ with st.sidebar:
         total_placeholder.success(f"**Total : {format_fcfa(total)}**")
 
         st.markdown("---")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            msg = "Bonjour, voici ma commande :\n\n" + "\n".join(
-                [f"- {item['nom']} × {item['quantite']} = {format_fcfa(item['prix']*item['quantite'])} FCFA"
-                 for item in st.session_state.cart]
-            ) + f"\n\nTotal : {format_fcfa(total)} FCFA"
-            st.link_button("📱 WhatsApp", f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(msg)}", use_container_width=True)
 
-        with col_b:
-            if st.button("✅ Valider Commande", type="primary", use_container_width=True):
-                with st.spinner("Enregistrement..."):
-                    payload = {
-                        "action": "nouvelle_commande",
-                        "password": MOT_DE_PASSE_ADMIN,
-                        "client_nom": "Client Site Web",
-                        "articles": st.session_state.cart,
-                        "total": total
-                    }
-                    reponse, err = call_passerelle(payload)
-                    if err or not reponse or reponse.get("status") != "success":
-                        st.error(f"❌ Erreur lors de l'enregistrement : {err or (reponse or {}).get('message', 'réponse invalide')}")
-                    else:
-                        st.success("✅ Commande enregistrée avec succès !")
-                        st.session_state.cart = []
-                        time.sleep(3)
-                        st.rerun()
+        msg = "Bonjour, voici ma commande :\n\n" + "\n".join(
+            [f"- {item['nom']} × {item['quantite']} = {format_fcfa(item['prix']*item['quantite'])} FCFA"
+             for item in st.session_state.cart]
+        ) + f"\n\nTotal : {format_fcfa(total)} FCFA"
+        wa_url = f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(msg)}"
+
+        if st.button("✅ Envoyer ma commande", type="primary", use_container_width=True):
+            with st.spinner("Enregistrement..."):
+                payload = {
+                    "action": "nouvelle_commande",
+                    "password": MOT_DE_PASSE_ADMIN,
+                    "client_nom": "Client Site Web",
+                    "articles": st.session_state.cart,
+                    "total": total
+                }
+                reponse, err = call_passerelle(payload)
+                if err or not reponse or reponse.get("status") != "success":
+                    st.error(f"❌ Erreur lors de l'enregistrement : {err or (reponse or {}).get('message', 'réponse invalide')}")
+                else:
+                    warnings = (reponse or {}).get("stock_warnings", [])
+                    if warnings:
+                        st.warning("⚠️ Stock insuffisant pour : " + ", ".join(warnings))
+                    st.success("✅ Commande enregistrée ! Redirection vers WhatsApp...")
+                    load_data.clear()  # le stock a été décrémenté côté serveur
+                    st.session_state.cart = []
+                    st.session_state.refresh_token += 1
+                    # Redirection automatique vers WhatsApp (fonctionne dans la plupart des navigateurs)
+                    st.markdown(f'<meta http-equiv="refresh" content="1; url={wa_url}">', unsafe_allow_html=True)
+                    st.link_button("📱 Cliquez ici si la redirection ne s'est pas faite", wa_url, use_container_width=True)
+                    time.sleep(2)
     else:
         header_placeholder.header("🛍️ Mon Panier")
         st.info("Votre panier est vide.")
