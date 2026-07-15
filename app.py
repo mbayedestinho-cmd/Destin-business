@@ -100,7 +100,7 @@ def load_config(refresh_token=0):
 
 config = load_config(st.session_state.get("refresh_token", 0))
 NOM_BOUTIQUE = config["nom_boutique"]
-NUMERO_WHATSAPP = re.sub(r"\D", "", config["whatsapp"])
+NUMERO_WHATSAPP = re.sub(r"\D", "", str(config.get("whatsapp") or ""))
 
 st.markdown(f'<div class="hero"><h1 class="main-title">{NOM_BOUTIQUE}</h1></div>', unsafe_allow_html=True)
 
