@@ -180,13 +180,15 @@ if not df_f.empty:
                         "quantite": 1
                     })
                 st.toast(f"✅ {row['nom']} ajouté au panier !", icon="🛍️")
+                time.sleep(0.6)
                 st.rerun()
 else:
     st.info("Aucun article ne correspond à vos critères.")
 
 # ====================== PANIER ======================
 with st.sidebar:
-    st.header("🛍️ Mon Panier")
+    nb_articles = sum(item['quantite'] for item in st.session_state.cart)
+    st.header(f"🛍️ Mon Panier ({nb_articles})" if nb_articles else "🛍️ Mon Panier")
     if st.session_state.cart:
         total = sum(item['prix'] * item['quantite'] for item in st.session_state.cart)
         st.success(f"**Total : {format_fcfa(total)}**")
