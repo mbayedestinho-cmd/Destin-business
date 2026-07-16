@@ -1,198 +1,3 @@
-import streamlit as st
-import pandas as pd
-import requests
-import urllib.parse
-import base64
-import time
-import uuid
-import re
-import unicodedata
-
-st.set_page_config(page_title="Collection Luxe N'Djamena", page_icon="✨", layout="wide")
-
-# ====================== CSS ======================
-st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Poppins:wght@300;400;500&display=swap');
-    .main-title {font-family: 'Playfair Display', serif; font-size: clamp(2.8rem, 8vw, 4.2rem); font-weight: 700; text-align: center; margin: 30px 0 20px 0; color: #fff;}
-    .hero {background: linear-gradient(135deg, #1a1a2e 0%, #3a2a1a 45%, #b58328 100%); padding: 130px 20px; text-align: center; color: white; border-radius: 20px; margin-bottom: 40px;}
-
-    /* ---- Bannière logo pleine largeur ---- */
-    .hero-banner {
-        position: relative;
-        width: 100%;
-        height: 340px;
-        border-radius: 24px;
-        overflow: hidden;
-        margin-bottom: 40px;
-        box-shadow: 0 15px 45px rgba(0,0,0,0.35);
-    }
-    .hero-banner img.hero-bg {
-        position: absolute;
-        top: 0; left: 0;
-        width: 100%; height: 100%;
-        object-fit: cover;
-        object-position: center 25%;
-        filter: brightness(0.9);
-    }
-    .hero-banner::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: linear-gradient(180deg, rgba(15,10,5,0.15) 0%, rgba(15,10,5,0.55) 65%, rgba(15,10,5,0.92) 100%);
-    }
-    .hero-banner .hero-content {
-        position: absolute;
-        bottom: 0; left: 0; right: 0;
-        padding: 30px 24px 26px 24px;
-        text-align: center;
-        z-index: 2;
-    }
-    .hero-banner .hero-content h1 {
-        font-family: 'Playfair Display', serif;
-        font-weight: 700;
-        font-size: clamp(2.2rem, 6vw, 3.6rem);
-        color: #fff;
-        margin: 0;
-        letter-spacing: 0.5px;
-        text-shadow: 0 4px 18px rgba(0,0,0,0.6);
-    }
-    .hero-banner .hero-content p {
-        font-family: 'Poppins', sans-serif;
-        font-weight: 300;
-        letter-spacing: 3px;
-        text-transform: uppercase;
-        font-size: 0.8rem;
-        color: #e8c98a;
-        margin: 8px 0 0 0;
-    }
-    @media (max-width: 640px) {
-        .hero-banner { height: 260px; border-radius: 18px; }
-    }
-    .product-card {background: white; border-radius: 16px; padding: 16px; box-shadow: 0 4px 25px rgba(0,0,0,0.06); transition: 0.3s; height: 100%; color: #1a1a1a;}
-    .product-card h3 {color: #1a1a1a; margin: 12px 0 6px 0;}
-    .product-card:hover {transform: translateY(-8px); box-shadow: 0 20px 40px rgba(0,0,0,0.1);}
-    .price {color: #b58328; font-weight: 700; font-size: 1.4rem;}
-    .stock {font-size: 0.9rem; color: #28a745; font-weight: 500;}
-    .stock-low {color: #dc3545; font-weight: 500;}
-    </style>
-""", unsafe_allow_html=True)
-
-# ====================== CONFIG ======================
-# Seuls les identifiants "techniques" (indispensables pour se connecter à ton
-# Google Sheet et à ImgBB) restent dans les secrets Streamlit. Le mot de passe
-# admin, le numéro WhatsApp et le nom de la boutique sont maintenant stockés
-# dans l'onglet "Config" de ton Google Sheet, et modifiables directement
-# depuis l'appli (onglet ⚙️ Paramètres de l'admin).
-URL_PASSERELLE = st.secrets.get("URL_PASSERELLE_WEB", "")
-ID_SHEET = st.secrets.get("ID_DU_SHEET", "").strip()
-IMGBB_API_KEY = st.secrets.get("IMGBB_API_KEY", "")
-
-if not all([URL_PASSERELLE, ID_SHEET, IMGBB_API_KEY]):
-    st.error("⚠️ Configuration incomplète dans les secrets Streamlit.")
-    st.stop()
-
-# ====================== SESSION STATE ======================
-if 'cart' not in st.session_state:
-    st.session_state.cart = []
-if 'admin_logged_in' not in st.session_state:
-    st.session_state.admin_logged_in = False
-if 'refresh_token' not in st.session_state:
-    st.session_state.refresh_token = 0
-if 'confirm_delete' not in st.session_state:
-    st.session_state.confirm_delete = False
-if 'admin_password' not in st.session_state:
-    st.session_state.admin_password = ""
-
-# ====================== HELPERS ======================
-def format_fcfa(n):
-    return f"{int(n):,} FCFA".replace(",", " ")
-
-def normalize_col(col):
-    """Met en minuscule, retire les espaces et supprime les accents d'un nom de colonne."""
-    col = str(col).lower().strip()
-    col = ''.join(c for c in unicodedata.normalize('NFD', col) if unicodedata.category(c) != 'Mn')
-    return col
-
-def get_unique_values(df, col):
-    """Retourne la liste des valeurs uniques d'une colonne, sans planter si elle est absente."""
-    if df.empty or col not in df.columns:
-        return ["Toutes"]
-    return ["Toutes"] + sorted(df[col].dropna().astype(str).unique())
-
-def upload_image_to_imgbb(file_bytes):
-    try:
-        b64 = base64.b64encode(file_bytes).decode()
-        res = requests.post("https://api.imgbb.com/1/upload",
-                           data={"key": IMGBB_API_KEY, "image": b64}, timeout=25)
-        if res.status_code != 200:
-            return None, "Erreur upload ImgBB"
-        return res.json()["data"]["url"], None
-    except Exception as e:
-        return None, str(e)
-
-def call_passerelle(payload, timeout=20):
-    try:
-        r = requests.post(URL_PASSERELLE, json=payload, timeout=timeout)
-        if r.status_code != 200:
-            return None, f"Erreur serveur ({r.status_code})"
-        return r.json(), None
-    except Exception as e:
-        return None, str(e)
-
-# ====================== CHARGEMENT CONFIG (nom boutique / whatsapp) ======================
-@st.cache_data(ttl=90, show_spinner=False)
-def load_config(refresh_token=0):
-    reponse, err = call_passerelle({"action": "get_config"})
-    if err or not reponse or reponse.get("status") != "success":
-        return {"nom_boutique": "Collection Luxe N'Djamena", "whatsapp": "", "logo": "", "email_admin": ""}
-    return {
-        "nom_boutique": reponse.get("nom_boutique") or "Collection Luxe N'Djamena",
-        "whatsapp": reponse.get("whatsapp") or "",
-        "logo": reponse.get("logo") or "",
-        "email_admin": reponse.get("email_admin") or ""
-    }
-
-config = load_config(st.session_state.get("refresh_token", 0))
-NOM_BOUTIQUE = config["nom_boutique"]
-NUMERO_WHATSAPP = re.sub(r"\D", "", str(config.get("whatsapp") or ""))
-LOGO_URL = config.get("logo") or ""
-
-if LOGO_URL:
-    st.markdown(
-        f'''<div class="hero-banner">
-                <img class="hero-bg" src="{LOGO_URL}">
-                <div class="hero-content">
-                    <h1>{NOM_BOUTIQUE}</h1>
-                    <p>Élégance &amp; Raffinement</p>
-                </div>
-            </div>''',
-        unsafe_allow_html=True
-    )
-else:
-    st.markdown(f'<div class="hero"><h1 class="main-title">{NOM_BOUTIQUE}</h1></div>', unsafe_allow_html=True)
-
-# ====================== CHARGEMENT DONNÉES ======================
-# ⚠️ FIX : le paramètre ne doit PAS commencer par "_" (Streamlit ignore les
-# paramètres préfixés par underscore dans le calcul de la clé de cache, donc
-# faire varier refresh_token n'invalidait jamais le cache). En complément,
-# on appelle explicitement load_data.clear() après chaque mutation réussie.
-@st.cache_data(ttl=90, show_spinner=False)
-def load_data(sheet_id, refresh_token=0):
-    try:
-        url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=Catalogue"
-        df = pd.read_csv(url)
-        df.columns = [normalize_col(col) for col in df.columns]
-        df = df.loc[:, ~df.columns.str.contains('^unnamed', case=False)]
-        df = df.dropna(subset=['nom', 'prix'])
-        df['prix_numeric'] = pd.to_numeric(df['prix'], errors='coerce').fillna(0)
-        df['stock'] = pd.to_numeric(df.get('stock', 0), errors='coerce').fillna(0)
-        return df
-    except Exception as e:
-        st.error(f"Erreur de chargement : {e}")
-        return pd.DataFrame()
-
-df_catalogue = load_data(ID_SHEET, st.session_state.refresh_token)
 
 # ====================== FILTRES ======================
 st.subheader("Notre Collection")
@@ -255,22 +60,93 @@ if not df_f.empty:
 
             if st.button("🛒 Ajouter au panier" if not en_rupture else "❌ Rupture de stock",
                         key=f"add_{idx}_{row.get('nom')}", disabled=en_rupture):
-                existing = next((item for item in st.session_state.cart if item['nom'] == row['nom']), None)
+                # 🆕 on n'ajoute plus directement au panier : on ouvre d'abord
+                # le petit formulaire de personnalisation (pseudo, taille, couleur, tél.)
+                st.session_state.pending_product = {
+                    "nom": row['nom'],
+                    "prix": prix,
+                    "image": row.get('image', ''),
+                    "tailles": row.get('tailles', ''),
+                    "couleurs": row.get('couleurs', ''),
+                }
+                st.rerun()
+else:
+    st.info("Aucun article ne correspond à vos critères.")
+
+# ====================== 🆕 FORMULAIRE DE PERSONNALISATION AVANT AJOUT ======================
+@st.dialog("🛍️ Personnaliser votre article")
+def formulaire_personnalisation(produit):
+    st.markdown(f"**{produit['nom']}** — {format_fcfa(produit['prix'])}")
+    if produit.get('image'):
+        st.image(produit['image'], width=160)
+
+    # Article pré-rempli et non modifiable : c'est celui sur lequel le client
+    # a cliqué "Ajouter au panier".
+    st.text_input("Article", value=produit['nom'], disabled=True)
+
+    pseudo = st.text_input(
+        "Nom ou pseudo *",
+        value=st.session_state.client_pseudo,
+        placeholder="Ex : Awa, ou votre pseudo",
+        key="dlg_pseudo"
+    )
+
+    options_tailles = parse_options(produit.get('tailles')) or TAILLES_DEFAUT
+    taille = st.selectbox("Taille souhaitée *", options_tailles, key="dlg_taille")
+
+    options_couleurs = parse_options(produit.get('couleurs'))
+    if options_couleurs:
+        couleur = st.selectbox("Couleur désirée *", options_couleurs, key="dlg_couleur")
+    else:
+        couleur = st.text_input("Couleur désirée *", placeholder="Ex : Noir, Bordeaux...", key="dlg_couleur_txt")
+
+    telephone = st.text_input(
+        "Numéro de téléphone *",
+        value=st.session_state.client_telephone,
+        placeholder="Ex : 66000000",
+        key="dlg_telephone"
+    )
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("✅ Ajouter au panier", type="primary", use_container_width=True):
+            if not pseudo.strip() or not taille or not str(couleur).strip() or not telephone.strip():
+                st.warning("Merci de remplir tous les champs obligatoires (*).")
+            else:
+                # Mémorise pseudo/téléphone pour pré-remplir les prochains articles
+                st.session_state.client_pseudo = pseudo.strip()
+                st.session_state.client_telephone = telephone.strip()
+
+                existing = next((
+                    item for item in st.session_state.cart
+                    if item['nom'] == produit['nom']
+                    and item.get('taille') == taille
+                    and item.get('couleur') == str(couleur).strip()
+                ), None)
                 if existing:
                     existing['quantite'] += 1
                 else:
                     st.session_state.cart.append({
                         "id": str(uuid.uuid4()),
-                        "nom": row['nom'],
-                        "prix": prix,
-                        "image": row.get('image', ''),
-                        "quantite": 1
+                        "nom": produit['nom'],
+                        "prix": produit['prix'],
+                        "image": produit.get('image', ''),
+                        "quantite": 1,
+                        "taille": taille,
+                        "couleur": str(couleur).strip(),
+                        "pseudo": pseudo.strip(),
+                        "telephone": telephone.strip(),
                     })
-                st.toast(f"✅ {row['nom']} ajouté au panier !", icon="🛍️")
-                time.sleep(0.6)
+                st.session_state.pending_product = None
+                st.toast(f"✅ {produit['nom']} ajouté au panier !", icon="🛍️")
                 st.rerun()
-else:
-    st.info("Aucun article ne correspond à vos critères.")
+    with col_b:
+        if st.button("❌ Annuler", use_container_width=True):
+            st.session_state.pending_product = None
+            st.rerun()
+
+if st.session_state.pending_product:
+    formulaire_personnalisation(st.session_state.pending_product)
 
 # ====================== PANIER ======================
 with st.sidebar:
@@ -279,7 +155,13 @@ with st.sidebar:
     if st.session_state.cart:
         for item in st.session_state.cart[:]:
             c1, c2, c3 = st.columns([5, 2, 1])
-            with c1: st.write(item['nom'])
+            with c1:
+                st.write(item['nom'])
+                details = " · ".join(
+                    d for d in [item.get('taille', ''), item.get('couleur', '')] if d
+                )
+                if details:
+                    st.caption(details)
             with c2:
                 item['quantite'] = st.number_input("Qté", min_value=1, value=item['quantite'], key=f"q_{item['id']}")
             with c3:
@@ -295,8 +177,13 @@ with st.sidebar:
 
         st.markdown("---")
 
-        msg = "Bonjour, voici ma commande :\n\n" + "\n".join(
-            [f"- {item['nom']} × {item['quantite']} = {format_fcfa(item['prix']*item['quantite'])} FCFA"
+        nom_client_msg = st.session_state.client_pseudo or "Client Site Web"
+        tel_client_msg = st.session_state.client_telephone
+
+        msg = f"Bonjour, voici ma commande ({nom_client_msg}"
+        msg += f" — {tel_client_msg})" if tel_client_msg else ")"
+        msg += " :\n\n" + "\n".join(
+            [f"- {item['nom']} ({item.get('taille', '')}, {item.get('couleur', '')}) × {item['quantite']} = {format_fcfa(item['prix']*item['quantite'])} FCFA"
              for item in st.session_state.cart]
         ) + f"\n\nTotal : {format_fcfa(total)} FCFA"
         wa_url = f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(msg)}"
@@ -306,7 +193,8 @@ with st.sidebar:
                 payload = {
                     "action": "nouvelle_commande",
                     "password": st.session_state.admin_password,
-                    "client_nom": "Client Site Web",
+                    "client_nom": nom_client_msg,
+                    "telephone": tel_client_msg,
                     "articles": st.session_state.cart,
                     "total": total
                 }
