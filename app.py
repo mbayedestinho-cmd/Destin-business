@@ -120,6 +120,18 @@ def get_unique_values(df, col):
         return ["Toutes"]
     return ["Toutes"] + sorted(df[col].dropna().astype(str).unique())
 
+def parse_variants(valeur):
+    """Découpe une chaîne 'S, M, L' ou 'Rouge / Bleu' en liste de valeurs propres, sans doublons."""
+    if not valeur or str(valeur).strip().lower() in ("", "nan", "unique"):
+        return []
+    morceaux = re.split(r"[,/;]", str(valeur))
+    vues = []
+    for m in morceaux:
+        m = m.strip()
+        if m and m not in vues:
+            vues.append(m)
+    return vues
+
 def upload_image_to_imgbb(file_bytes):
     try:
         b64 = base64.b64encode(file_bytes).decode()
@@ -232,10 +244,54 @@ if not df_f.empty:
 
 st.caption(f"**{len(df_f)} article(s)** trouvé(s)")
 
+# ====================== PAGINATION ======================
+ARTICLES_PAR_PAGE = 12
+total_articles = len(df_f)
+total_pages = max(1, -(-total_articles // ARTICLES_PAR_PAGE))  # arrondi au supérieur
+
+if 'catalog_page' not in st.session_state:
+    st.session_state.catalog_page = 1
+
+# Si les filtres changent, on revient à la page 1 pour éviter une page vide
+filtres_signature = (search, cat_filter, taille_filter, sort_option, min_price, max_price)
+if st.session_state.get('catalog_filters_signature') != filtres_signature:
+    st.session_state.catalog_filters_signature = filtres_signature
+    st.session_state.catalog_page = 1
+
+if st.session_state.catalog_page > total_pages:
+    st.session_state.catalog_page = total_pages
+if st.session_state.catalog_page < 1:
+    st.session_state.catalog_page = 1
+
+debut = (st.session_state.catalog_page - 1) * ARTICLES_PAR_PAGE
+df_page = df_f.iloc[debut:debut + ARTICLES_PAR_PAGE]
+
+def afficher_controles_pagination(position):
+    if total_pages <= 1:
+        return
+    pc1, pc2, pc3 = st.columns([1, 2, 1])
+    with pc1:
+        if st.button("⬅️ Précédent", key=f"prev_{position}", disabled=st.session_state.catalog_page <= 1,
+                     use_container_width=True):
+            st.session_state.catalog_page -= 1
+            st.rerun()
+    with pc2:
+        st.markdown(
+            f"<div style='text-align:center; padding-top:8px;'>Page {st.session_state.catalog_page} / {total_pages}</div>",
+            unsafe_allow_html=True
+        )
+    with pc3:
+        if st.button("Suivant ➡️", key=f"next_{position}", disabled=st.session_state.catalog_page >= total_pages,
+                     use_container_width=True):
+            st.session_state.catalog_page += 1
+            st.rerun()
+
 # ====================== AFFICHAGE PRODUITS ======================
 if not df_f.empty:
+    afficher_controles_pagination("haut")
+    st.markdown("")
     cols = st.columns(3)
-    for idx, row in df_f.iterrows():
+    for idx, row in df_page.iterrows():
         with cols[idx % 3]:
             prix = int(row['prix_numeric'])
             stock = int(row['stock'])
@@ -253,9 +309,32 @@ if not df_f.empty:
                 </div>
             """, unsafe_allow_html=True)
 
+            options_taille = parse_variants(row.get('tailles', ''))
+            options_couleur = parse_variants(row.get('couleurs', ''))
+
+            taille_choisie = ""
+            couleur_choisie = ""
+            if options_taille:
+                if len(options_taille) == 1:
+                    taille_choisie = options_taille[0]
+                else:
+                    taille_choisie = st.selectbox(
+                        "Taille", options_taille, key=f"taille_{idx}_{row.get('nom')}"
+                    )
+            if options_couleur:
+                if len(options_couleur) == 1:
+                    couleur_choisie = options_couleur[0]
+                else:
+                    couleur_choisie = st.selectbox(
+                        "Couleur", options_couleur, key=f"couleur_{idx}_{row.get('nom')}"
+                    )
+
             if st.button("🛒 Ajouter au panier" if not en_rupture else "❌ Rupture de stock",
                         key=f"add_{idx}_{row.get('nom')}", disabled=en_rupture):
-                existing = next((item for item in st.session_state.cart if item['nom'] == row['nom']), None)
+                existing = next((item for item in st.session_state.cart
+                                  if item['nom'] == row['nom']
+                                  and item.get('taille', '') == taille_choisie
+                                  and item.get('couleur', '') == couleur_choisie), None)
                 if existing:
                     existing['quantite'] += 1
                 else:
@@ -264,11 +343,17 @@ if not df_f.empty:
                         "nom": row['nom'],
                         "prix": prix,
                         "image": row.get('image', ''),
+                        "taille": taille_choisie,
+                        "couleur": couleur_choisie,
                         "quantite": 1
                     })
-                st.toast(f"✅ {row['nom']} ajouté au panier !", icon="🛍️")
+                variante = " / ".join(v for v in [taille_choisie, couleur_choisie] if v)
+                label_toast = f"{row['nom']} ({variante})" if variante else row['nom']
+                st.toast(f"✅ {label_toast} ajouté au panier !", icon="🛍️")
                 time.sleep(0.6)
                 st.rerun()
+    st.markdown("---")
+    afficher_controles_pagination("bas")
 else:
     st.info("Aucun article ne correspond à vos critères.")
 
@@ -279,7 +364,13 @@ with st.sidebar:
     if st.session_state.cart:
         for item in st.session_state.cart[:]:
             c1, c2, c3 = st.columns([5, 2, 1])
-            with c1: st.write(item['nom'])
+            with c1:
+                variante_item = " / ".join(v for v in [item.get('taille', ''), item.get('couleur', '')] if v)
+                if variante_item:
+                    st.write(f"{item['nom']}")
+                    st.caption(variante_item)
+                else:
+                    st.write(item['nom'])
             with c2:
                 item['quantite'] = st.number_input("Qté", min_value=1, value=item['quantite'], key=f"q_{item['id']}")
             with c3:
@@ -295,18 +386,39 @@ with st.sidebar:
 
         st.markdown("---")
 
-        msg = "Bonjour, voici ma commande :\n\n" + "\n".join(
-            [f"- {item['nom']} × {item['quantite']} = {format_fcfa(item['prix']*item['quantite'])} FCFA"
-             for item in st.session_state.cart]
+        def _ligne_article(item):
+            variante = " / ".join(v for v in [item.get('taille', ''), item.get('couleur', '')] if v)
+            suffixe = f" ({variante})" if variante else ""
+            return f"- {item['nom']}{suffixe} × {item['quantite']} = {format_fcfa(item['prix']*item['quantite'])} FCFA"
+
+        st.markdown("**📇 Vos coordonnées**")
+        client_nom_saisi = st.text_input("Votre nom *", key="client_nom_input")
+        client_telephone_saisi = st.text_input(
+            "Votre téléphone *", key="client_telephone_input",
+            placeholder="Ex : 66000000"
+        )
+
+        entete_msg = (
+            f"Bonjour, je m'appelle {client_nom_saisi.strip()}, voici ma commande :"
+            if client_nom_saisi.strip() else "Bonjour, voici ma commande :"
+        )
+        msg = entete_msg + "\n\n" + "\n".join(
+            [_ligne_article(item) for item in st.session_state.cart]
         ) + f"\n\nTotal : {format_fcfa(total)} FCFA"
         wa_url = f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(msg)}"
 
-        if st.button("✅ Envoyer ma commande", type="primary", use_container_width=True):
+        coordonnees_completes = client_nom_saisi.strip() and client_telephone_saisi.strip()
+        if not coordonnees_completes:
+            st.caption("⚠️ Merci de renseigner votre nom et votre téléphone avant d'envoyer la commande.")
+
+        if st.button("✅ Envoyer ma commande", type="primary", use_container_width=True,
+                     disabled=not coordonnees_completes):
             with st.spinner("Enregistrement..."):
                 payload = {
                     "action": "nouvelle_commande",
                     "password": st.session_state.admin_password,
-                    "client_nom": "Client Site Web",
+                    "client_nom": client_nom_saisi.strip(),
+                    "client_telephone": re.sub(r"\D", "", client_telephone_saisi),
                     "articles": st.session_state.cart,
                     "total": total
                 }
@@ -341,7 +453,7 @@ with st.sidebar:
         header_placeholder.header("🛍️ Mon Panier")
         st.info("Votre panier est vide.")
 
-    # ====================== 🆕 SUIVI DE COMMANDE (visible à tous les clients) ======================
+    # ====================== SUIVI DE COMMANDE (visible à tous les clients) ======================
     st.markdown("---")
     with st.expander("📦 Suivre ma commande"):
         id_suivi = st.text_input(
@@ -424,8 +536,10 @@ with st.sidebar:
                     orders_df = pd.DataFrame(orders_list)
                     orders_df['date'] = pd.to_datetime(orders_df['date']).dt.strftime("%d/%m/%Y %H:%M")
                     orders_df['total'] = orders_df['total'].apply(format_fcfa)
-                    # 🆕 id_commande peut être vide pour les commandes créées avant la mise à jour du script
+                    # id_commande et telephone peuvent être vides pour les commandes créées avant les mises à jour du script
                     colonnes_affichees = ['date', 'client', 'total', 'articles_count', 'statut']
+                    if 'telephone' in orders_df.columns:
+                        colonnes_affichees.insert(2, 'telephone')
                     if 'id_commande' in orders_df.columns:
                         colonnes_affichees.insert(0, 'id_commande')
                     st.dataframe(orders_df[colonnes_affichees],
