@@ -1,4 +1,50 @@
+        margin: 0;
+        letter-spacing: 0.5px;
+        text-shadow: 0 4px 18px rgba(0,0,0,0.6);
+    }
+    .hero-banner .hero-content p {
+        font-family: 'Poppins', sans-serif;
+        font-weight: 300;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        font-size: 0.8rem;
+        color: #e8c98a;
+        margin: 8px 0 0 0;
+    }
+    @media (max-width: 640px) {
+        .hero-banner { height: 260px; border-radius: 18px; }
+    }
+    .product-card {background: white; border-radius: 16px; padding: 16px; box-shadow: 0 4px 25px rgba(0,0,0,0.06); transition: 0.3s; height: 100%; color: #1a1a1a;}
+    .product-card h3 {color: #1a1a1a; margin: 12px 0 6px 0;}
+    .product-card:hover {transform: translateY(-8px); box-shadow: 0 20px 40px rgba(0,0,0,0.1);}
+    .price {color: #b58328; font-weight: 700; font-size: 1.4rem;}
+    .stock {font-size: 0.9rem; color: #28a745; font-weight: 500;}
+    .stock-low {color: #dc3545; font-weight: 500;}
+    </style>
+""", unsafe_allow_html=True)
 
+# ====================== CONFIG ======================
+# Seuls les identifiants "techniques" (indispensables pour se connecter à ton
+# Google Sheet et à ImgBB) restent dans les secrets Streamlit. Le mot de passe
+# admin, le numéro WhatsApp et le nom de la boutique sont maintenant stockés
+# dans l'onglet "Config" de ton Google Sheet, et modifiables directement
+# depuis l'appli (onglet ⚙️ Paramètres de l'admin).
+URL_PASSERELLE = st.secrets.get("URL_PASSERELLE_WEB", "")
+ID_SHEET = st.secrets.get("ID_DU_SHEET", "").strip()
+IMGBB_API_KEY = st.secrets.get("IMGBB_API_KEY", "")
+
+if not all([URL_PASSERELLE, ID_SHEET, IMGBB_API_KEY]):
+    st.error("⚠️ Configuration incomplète dans les secrets Streamlit.")
+    st.stop()
+
+# ====================== SESSION STATE ======================
+if 'cart' not in st.session_state:
+    st.session_state.cart = []
+if 'admin_logged_in' not in st.session_state:
+    st.session_state.admin_logged_in = False
+if 'refresh_token' not in st.session_state:
+    st.session_state.refresh_token = 0
+if 'confirm_delete' not in st.session_state:
     st.session_state.confirm_delete = False
 if 'admin_password' not in st.session_state:
     st.session_state.admin_password = ""
