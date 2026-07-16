@@ -1,105 +1,4 @@
-import streamlit as st
-import pandas as pd
-import requests
-import urllib.parse
-import base64
-import time
-import uuid
-import re
-import unicodedata
 
-st.set_page_config(page_title="Collection Luxe N'Djamena", page_icon="✨", layout="wide")
-
-# ====================== CSS ======================
-st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Poppins:wght@300;400;500&display=swap');
-    .main-title {font-family: 'Playfair Display', serif; font-size: clamp(2.8rem, 8vw, 4.2rem); font-weight: 700; text-align: center; margin: 30px 0 20px 0; color: #fff;}
-    .hero {background: linear-gradient(135deg, #1a1a2e 0%, #3a2a1a 45%, #b58328 100%); padding: 130px 20px; text-align: center; color: white; border-radius: 20px; margin-bottom: 40px;}
-
-    /* ---- Bannière logo pleine largeur ---- */
-    .hero-banner {
-        position: relative;
-        width: 100%;
-        height: 340px;
-        border-radius: 24px;
-        overflow: hidden;
-        margin-bottom: 40px;
-        box-shadow: 0 15px 45px rgba(0,0,0,0.35);
-    }
-    .hero-banner img.hero-bg {
-        position: absolute;
-        top: 0; left: 0;
-        width: 100%; height: 100%;
-        object-fit: cover;
-        object-position: center 25%;
-        filter: brightness(0.9);
-    }
-    .hero-banner::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: linear-gradient(180deg, rgba(15,10,5,0.15) 0%, rgba(15,10,5,0.55) 65%, rgba(15,10,5,0.92) 100%);
-    }
-    .hero-banner .hero-content {
-        position: absolute;
-        bottom: 0; left: 0; right: 0;
-        padding: 30px 24px 26px 24px;
-        text-align: center;
-        z-index: 2;
-    }
-    .hero-banner .hero-content h1 {
-        font-family: 'Playfair Display', serif;
-        font-weight: 700;
-        font-size: clamp(2.2rem, 6vw, 3.6rem);
-        color: #fff;
-        margin: 0;
-        letter-spacing: 0.5px;
-        text-shadow: 0 4px 18px rgba(0,0,0,0.6);
-    }
-    .hero-banner .hero-content p {
-        font-family: 'Poppins', sans-serif;
-        font-weight: 300;
-        letter-spacing: 3px;
-        text-transform: uppercase;
-        font-size: 0.8rem;
-        color: #e8c98a;
-        margin: 8px 0 0 0;
-    }
-    @media (max-width: 640px) {
-        .hero-banner { height: 260px; border-radius: 18px; }
-    }
-    .product-card {background: white; border-radius: 16px; padding: 16px; box-shadow: 0 4px 25px rgba(0,0,0,0.06); transition: 0.3s; height: 100%; color: #1a1a1a;}
-    .product-card h3 {color: #1a1a1a; margin: 12px 0 6px 0;}
-    .product-card:hover {transform: translateY(-8px); box-shadow: 0 20px 40px rgba(0,0,0,0.1);}
-    .price {color: #b58328; font-weight: 700; font-size: 1.4rem;}
-    .stock {font-size: 0.9rem; color: #28a745; font-weight: 500;}
-    .stock-low {color: #dc3545; font-weight: 500;}
-    </style>
-""", unsafe_allow_html=True)
-
-# ====================== CONFIG ======================
-# Seuls les identifiants "techniques" (indispensables pour se connecter à ton
-# Google Sheet et à ImgBB) restent dans les secrets Streamlit. Le mot de passe
-# admin, le numéro WhatsApp et le nom de la boutique sont maintenant stockés
-# dans l'onglet "Config" de ton Google Sheet, et modifiables directement
-# depuis l'appli (onglet ⚙️ Paramètres de l'admin).
-URL_PASSERELLE = st.secrets.get("URL_PASSERELLE_WEB", "")
-ID_SHEET = st.secrets.get("ID_DU_SHEET", "").strip()
-IMGBB_API_KEY = st.secrets.get("IMGBB_API_KEY", "")
-
-if not all([URL_PASSERELLE, ID_SHEET, IMGBB_API_KEY]):
-    st.error("⚠️ Configuration incomplète dans les secrets Streamlit.")
-    st.stop()
-
-# ====================== SESSION STATE ======================
-if 'cart' not in st.session_state:
-    st.session_state.cart = []
-if 'admin_logged_in' not in st.session_state:
-    st.session_state.admin_logged_in = False
-if 'refresh_token' not in st.session_state:
-    st.session_state.refresh_token = 0
-if 'confirm_delete' not in st.session_state:
     st.session_state.confirm_delete = False
 if 'admin_password' not in st.session_state:
     st.session_state.admin_password = ""
@@ -119,21 +18,6 @@ def get_unique_values(df, col):
     if df.empty or col not in df.columns:
         return ["Toutes"]
     return ["Toutes"] + sorted(df[col].dropna().astype(str).unique())
-
-# 🆕 Tailles proposées par défaut si l'article n'a pas de tailles spécifiques dans le catalogue
-TAILLES_PAR_DEFAUT = ["Unique", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
-
-def get_field_options(row, col_name, fallback):
-    """Découpe une valeur du catalogue (ex : 'S, M, L') en liste d'options.
-    Retourne le fallback si la colonne est vide, absente ou vaut 'Unique'."""
-    try:
-        val = str(row.get(col_name, '') or '').strip()
-    except AttributeError:
-        val = ''
-    if not val or val.lower() == 'unique':
-        return fallback
-    opts = [o.strip() for o in val.split(',') if o.strip()]
-    return opts if opts else fallback
 
 def upload_image_to_imgbb(file_bytes):
     try:
@@ -310,103 +194,48 @@ with st.sidebar:
 
         st.markdown("---")
 
-        # ====================== 🆕 FORMULAIRE CLIENT (avant envoi de la commande) ======================
-        st.markdown("#### 📝 Vos informations")
-        st.caption("Merci de remplir ces informations pour finaliser votre commande.")
+        msg = "Bonjour, voici ma commande :\n\n" + "\n".join(
+            [f"- {item['nom']} × {item['quantite']} = {format_fcfa(item['prix']*item['quantite'])} FCFA"
+             for item in st.session_state.cart]
+        ) + f"\n\nTotal : {format_fcfa(total)} FCFA"
+        wa_url = f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(msg)}"
 
-        with st.form("form_infos_client"):
-            client_nom = st.text_input("Nom complet ou pseudo *", key="checkout_nom")
-            client_telephone = st.text_input(
-                "Numéro de téléphone *", key="checkout_tel", placeholder="Ex : 66 00 00 00"
-            )
-
-            st.markdown("**Détails de chaque article**")
-            details_articles = {}
-            for item in st.session_state.cart:
-                st.markdown(f"— **{item['nom']}** (article pré-rempli, × {item['quantite']})")
-
-                row_match = df_catalogue[df_catalogue['nom'].astype(str) == item['nom']] if not df_catalogue.empty else pd.DataFrame()
-                row_article = row_match.iloc[0] if not row_match.empty else {}
-
-                tailles_options = get_field_options(row_article, 'tailles', TAILLES_PAR_DEFAUT)
-                taille_sel = st.selectbox(
-                    "Taille souhaitée", tailles_options, key=f"taille_{item['id']}"
-                )
-
-                couleurs_val = str((row_article.get('couleurs', '') if hasattr(row_article, 'get') else '') or '').strip()
-                couleurs_options = [c.strip() for c in couleurs_val.split(',') if c.strip()]
-                if couleurs_options:
-                    couleur_sel = st.selectbox(
-                        "Couleur désirée", couleurs_options, key=f"couleur_{item['id']}"
-                    )
+        if st.button("✅ Envoyer ma commande", type="primary", use_container_width=True):
+            with st.spinner("Enregistrement..."):
+                payload = {
+                    "action": "nouvelle_commande",
+                    "password": st.session_state.admin_password,
+                    "client_nom": "Client Site Web",
+                    "articles": st.session_state.cart,
+                    "total": total
+                }
+                reponse, err = call_passerelle(payload)
+                if err or not reponse or reponse.get("status") != "success":
+                    st.error(f"❌ Erreur lors de l'enregistrement : {err or (reponse or {}).get('message', 'réponse invalide')}")
                 else:
-                    couleur_sel = st.text_input(
-                        "Couleur désirée", key=f"couleur_{item['id']}"
-                    )
-
-                details_articles[item['id']] = {"taille": taille_sel, "couleur": couleur_sel}
-                st.markdown("&nbsp;", unsafe_allow_html=True)
-
-            envoyer = st.form_submit_button("✅ Envoyer ma commande", type="primary", use_container_width=True)
-
-        if envoyer:
-            if not client_nom.strip() or not client_telephone.strip():
-                st.warning("Merci de renseigner votre nom (ou pseudo) et votre numéro de téléphone.")
-            elif any(not d["couleur"].strip() for d in details_articles.values()):
-                st.warning("Merci de préciser la couleur désirée pour chaque article.")
-            else:
-                articles_enrichis = [
-                    {**item, "taille": details_articles[item['id']]["taille"],
-                     "couleur": details_articles[item['id']]["couleur"]}
-                    for item in st.session_state.cart
-                ]
-
-                msg = (
-                    f"Bonjour, je m'appelle {client_nom.strip()} (Tél : {client_telephone.strip()}).\n"
-                    "Voici ma commande :\n\n" + "\n".join(
-                        [f"- {a['nom']} (Taille : {a['taille']}, Couleur : {a['couleur']}) × {a['quantite']} "
-                         f"= {format_fcfa(a['prix']*a['quantite'])} FCFA"
-                         for a in articles_enrichis]
-                    ) + f"\n\nTotal : {format_fcfa(total)} FCFA"
-                )
-                wa_url = f"https://wa.me/{NUMERO_WHATSAPP}?text={urllib.parse.quote(msg)}"
-
-                with st.spinner("Enregistrement..."):
-                    payload = {
-                        "action": "nouvelle_commande",
-                        "password": st.session_state.admin_password,
-                        "client_nom": client_nom.strip(),
-                        "client_telephone": client_telephone.strip(),
-                        "articles": articles_enrichis,
-                        "total": total
-                    }
-                    reponse, err = call_passerelle(payload)
-                    if err or not reponse or reponse.get("status") != "success":
-                        st.error(f"❌ Erreur lors de l'enregistrement : {err or (reponse or {}).get('message', 'réponse invalide')}")
-                    else:
-                        warnings = (reponse or {}).get("stock_warnings", [])
-                        if warnings:
-                            st.warning("⚠️ Stock insuffisant pour : " + ", ".join(warnings))
-                        st.success("✅ Commande enregistrée ! Cliquez ci-dessous pour l'envoyer sur WhatsApp 👇")
-                        id_commande_recue = (reponse or {}).get("id_commande", "")
-                        if id_commande_recue:
-                            st.info(
-                                f"📦 Votre numéro de commande : **{id_commande_recue}**\n\n"
-                                "Conservez-le précieusement, il vous permet de suivre l'état de votre commande "
-                                "ci-dessous, dans « Suivre ma commande »."
-                            )
-                        load_data.clear()  # le stock a été décrémenté côté serveur
-                        st.session_state.cart = []
-                        st.session_state.refresh_token += 1
-                        st.markdown(
-                            f'''<a href="{wa_url}" target="_blank" rel="noopener"
-                                    style="display:block; text-align:center; background:#25D366; color:white;
-                                           font-weight:600; padding:12px 16px; border-radius:8px;
-                                           text-decoration:none; margin-top:8px;">
-                                    📱 Envoyer la confirmation sur WhatsApp
-                                </a>''',
-                            unsafe_allow_html=True
+                    warnings = (reponse or {}).get("stock_warnings", [])
+                    if warnings:
+                        st.warning("⚠️ Stock insuffisant pour : " + ", ".join(warnings))
+                    st.success("✅ Commande enregistrée ! Cliquez ci-dessous pour l'envoyer sur WhatsApp 👇")
+                    id_commande_recue = (reponse or {}).get("id_commande", "")
+                    if id_commande_recue:
+                        st.info(
+                            f"📦 Votre numéro de commande : **{id_commande_recue}**\n\n"
+                            "Conservez-le précieusement, il vous permet de suivre l'état de votre commande "
+                            "ci-dessous, dans « Suivre ma commande »."
                         )
+                    load_data.clear()  # le stock a été décrémenté côté serveur
+                    st.session_state.cart = []
+                    st.session_state.refresh_token += 1
+                    st.markdown(
+                        f'''<a href="{wa_url}" target="_blank" rel="noopener"
+                                style="display:block; text-align:center; background:#25D366; color:white;
+                                       font-weight:600; padding:12px 16px; border-radius:8px;
+                                       text-decoration:none; margin-top:8px;">
+                                📱 Envoyer la confirmation sur WhatsApp
+                            </a>''',
+                        unsafe_allow_html=True
+                    )
     else:
         header_placeholder.header("🛍️ Mon Panier")
         st.info("Votre panier est vide.")
@@ -435,21 +264,11 @@ with st.sidebar:
                     cmd = reponse_suivi.get("commande", {})
                     st.success(f"Statut actuel : **{cmd.get('statut', 'En cours')}**")
                     st.write(f"Total : {format_fcfa(cmd.get('total', 0))}")
-                    if cmd.get("telephone"):
-                        st.write(f"Téléphone : {cmd.get('telephone')}")
                     articles_cmd = cmd.get("articles", [])
                     if articles_cmd:
                         st.caption("Articles commandés :")
                         for art in articles_cmd:
-                            detail = f"- {art.get('nom', '')} × {art.get('quantite', '')}"
-                            extras = []
-                            if art.get('taille'):
-                                extras.append(f"Taille : {art['taille']}")
-                            if art.get('couleur'):
-                                extras.append(f"Couleur : {art['couleur']}")
-                            if extras:
-                                detail += " (" + ", ".join(extras) + ")"
-                            st.caption(detail)
+                            st.caption(f"- {art.get('nom', '')} × {art.get('quantite', '')}")
 
     # ====================== ADMINISTRATION AVANCÉE (cachée aux clients) ======================
     # Section visible uniquement si l'URL contient ?admin=1, ou une fois déjà connecté.
@@ -506,8 +325,6 @@ with st.sidebar:
                     orders_df['total'] = orders_df['total'].apply(format_fcfa)
                     # 🆕 id_commande peut être vide pour les commandes créées avant la mise à jour du script
                     colonnes_affichees = ['date', 'client', 'total', 'articles_count', 'statut']
-                    if 'telephone' in orders_df.columns:
-                        colonnes_affichees.insert(2, 'telephone')
                     if 'id_commande' in orders_df.columns:
                         colonnes_affichees.insert(0, 'id_commande')
                     st.dataframe(orders_df[colonnes_affichees],
