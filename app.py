@@ -318,6 +318,13 @@ with st.sidebar:
                     if warnings:
                         st.warning("⚠️ Stock insuffisant pour : " + ", ".join(warnings))
                     st.success("✅ Commande enregistrée ! Cliquez ci-dessous pour l'envoyer sur WhatsApp 👇")
+                    id_commande_recue = (reponse or {}).get("id_commande", "")
+                    if id_commande_recue:
+                        st.info(
+                            f"📦 Votre numéro de commande : **{id_commande_recue}**\n\n"
+                            "Conservez-le précieusement, il vous permet de suivre l'état de votre commande "
+                            "ci-dessous, dans « Suivre ma commande »."
+                        )
                     load_data.clear()  # le stock a été décrémenté côté serveur
                     st.session_state.cart = []
                     st.session_state.refresh_token += 1
@@ -333,6 +340,36 @@ with st.sidebar:
     else:
         header_placeholder.header("🛍️ Mon Panier")
         st.info("Votre panier est vide.")
+
+    # ====================== 🆕 SUIVI DE COMMANDE (visible à tous les clients) ======================
+    st.markdown("---")
+    with st.expander("📦 Suivre ma commande"):
+        id_suivi = st.text_input(
+            "Numéro de commande",
+            key="id_suivi_input",
+            placeholder="Ex : CMD-1234567890-1234"
+        )
+        if st.button("🔍 Vérifier le statut", key="btn_suivi", use_container_width=True):
+            if not id_suivi.strip():
+                st.warning("Merci d'entrer un numéro de commande.")
+            else:
+                with st.spinner("Recherche en cours..."):
+                    reponse_suivi, err_suivi = call_passerelle({
+                        "action": "suivre_commande",
+                        "id_commande": id_suivi.strip()
+                    })
+                if err_suivi or not reponse_suivi or reponse_suivi.get("status") != "success":
+                    message_erreur = (reponse_suivi or {}).get("message") or err_suivi or "Commande introuvable."
+                    st.error(f"❌ {message_erreur}")
+                else:
+                    cmd = reponse_suivi.get("commande", {})
+                    st.success(f"Statut actuel : **{cmd.get('statut', 'En cours')}**")
+                    st.write(f"Total : {format_fcfa(cmd.get('total', 0))}")
+                    articles_cmd = cmd.get("articles", [])
+                    if articles_cmd:
+                        st.caption("Articles commandés :")
+                        for art in articles_cmd:
+                            st.caption(f"- {art.get('nom', '')} × {art.get('quantite', '')}")
 
     # ====================== ADMINISTRATION AVANCÉE (cachée aux clients) ======================
     # Section visible uniquement si l'URL contient ?admin=1, ou une fois déjà connecté.
