@@ -217,7 +217,19 @@ def load_data(sheet_id, refresh_token=0):
         st.error(f"Erreur de chargement : {e}")
         return pd.DataFrame()
 
+def uniformiser_colonne_images_supp(df):
+    """Renomme la colonne des photos supplémentaires vers un nom standard, même si l'en-tête
+    du Google Sheet est abrégé, mal orthographié ou sans accents (ex: 'imag_suplé',
+    'images_supp', 'Images Supplémentaires', ...)."""
+    if df.empty:
+        return df
+    for c in df.columns:
+        if c != 'images_supplementaires' and 'imag' in c and ('suppl' in c or 'supl' in c or 'sup' in c):
+            return df.rename(columns={c: 'images_supplementaires'})
+    return df
+
 df_catalogue = load_data(ID_SHEET, st.session_state.refresh_token)
+df_catalogue = uniformiser_colonne_images_supp(df_catalogue)
 
 # ====================== FILTRES ======================
 st.subheader("Notre Collection")
