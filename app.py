@@ -601,7 +601,7 @@ with st.sidebar:
                     if st.session_state.get("dernier_maj_statut"):
                         info_maj = st.session_state.dernier_maj_statut
                         ref_cmd = info_maj.get("id_commande") or "votre commande"
-                        tel_client = re.sub(r"\D", "", info_maj.get("telephone", ""))
+                        tel_client = re.sub(r"\D", "", str(info_maj.get("telephone", "") or ""))
 
                         messages_statut = {
                             "Payé": f"Bonjour {info_maj.get('client', '')}, votre commande {ref_cmd} a bien été reçue et le paiement est confirmé ✅. Merci pour votre confiance !",
