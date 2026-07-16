@@ -145,11 +145,12 @@ def call_passerelle(payload, timeout=20):
 def load_config(refresh_token=0):
     reponse, err = call_passerelle({"action": "get_config"})
     if err or not reponse or reponse.get("status") != "success":
-        return {"nom_boutique": "Collection Luxe N'Djamena", "whatsapp": "", "logo": ""}
+        return {"nom_boutique": "Collection Luxe N'Djamena", "whatsapp": "", "logo": "", "email_admin": ""}
     return {
         "nom_boutique": reponse.get("nom_boutique") or "Collection Luxe N'Djamena",
         "whatsapp": reponse.get("whatsapp") or "",
-        "logo": reponse.get("logo") or ""
+        "logo": reponse.get("logo") or "",
+        "email_admin": reponse.get("email_admin") or ""
     }
 
 config = load_config(st.session_state.get("refresh_token", 0))
@@ -687,6 +688,28 @@ with st.sidebar:
                         st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
                     else:
                         st.success("✅ Numéro WhatsApp mis à jour !")
+                        load_config.clear()
+                        time.sleep(1.2)
+                        st.rerun()
+
+            st.markdown("---")
+            with st.form("form_email_admin"):
+                st.markdown("**📧 Email de notification des commandes**")
+                st.caption("Une notification automatique sera envoyée à cette adresse à chaque nouvelle commande.")
+                nouvel_email_admin = st.text_input(
+                    "Adresse email",
+                    value=config.get("email_admin", "")
+                )
+                if st.form_submit_button("💾 Enregistrer l'email"):
+                    reponse, err = call_passerelle({
+                        "action": "modifier_config",
+                        "password": st.session_state.admin_password,
+                        "nouveau_email_admin": nouvel_email_admin.strip()
+                    })
+                    if err or not reponse or reponse.get("status") != "success":
+                        st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
+                    else:
+                        st.success("✅ Email de notification mis à jour !")
                         load_config.clear()
                         time.sleep(1.2)
                         st.rerun()
