@@ -586,7 +586,58 @@ with st.sidebar:
                             st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
                         else:
                             st.success("✅ Statut mis à jour !")
-                            time.sleep(1.2)
+                            # On garde les infos en mémoire pour proposer le lien WhatsApp
+                            # après le rechargement de la page (sinon il disparaîtrait aussitôt).
+                            st.session_state.dernier_maj_statut = {
+                                "client": commande_cible.get("client", ""),
+                                "telephone": commande_cible.get("telephone", ""),
+                                "id_commande": commande_cible.get("id_commande", ""),
+                                "nouveau_statut": nouveau_statut
+                            }
+                            st.session_state.refresh_token += 1
+                            st.rerun()
+
+                    # ====================== NOTIFIER LE CLIENT PAR WHATSAPP ======================
+                    if st.session_state.get("dernier_maj_statut"):
+                        info_maj = st.session_state.dernier_maj_statut
+                        ref_cmd = info_maj.get("id_commande") or "votre commande"
+                        tel_client = re.sub(r"\D", "", info_maj.get("telephone", ""))
+
+                        messages_statut = {
+                            "Payé": f"Bonjour {info_maj.get('client', '')}, votre commande {ref_cmd} a bien été reçue et le paiement est confirmé ✅. Merci pour votre confiance !",
+                            "Livré": f"Bonjour {info_maj.get('client', '')}, votre commande {ref_cmd} a été livrée 📦✅. Merci pour votre achat, à bientôt !",
+                            "Annulé": f"Bonjour {info_maj.get('client', '')}, nous sommes désolés : votre commande {ref_cmd} a été annulée. N'hésitez pas à nous contacter pour plus d'informations.",
+                            "En cours": f"Bonjour {info_maj.get('client', '')}, votre commande {ref_cmd} est en cours de traitement. Nous vous tiendrons informé(e) !"
+                        }
+                        message_client = messages_statut.get(info_maj["nouveau_statut"], "")
+
+                        st.markdown("---")
+                        if tel_client:
+                            wa_client_url = f"https://wa.me/{tel_client}?text={urllib.parse.quote(message_client)}"
+                            st.info(
+                                f"📲 Prévenir **{info_maj.get('client', 'le client')}** du nouveau statut "
+                                f"« {info_maj['nouveau_statut']} » ?"
+                            )
+                            st.caption(
+                                "⚠️ Vérifie que le numéro comporte bien l'indicatif pays avant d'envoyer "
+                                "(le client l'a saisi tel quel au moment de la commande)."
+                            )
+                            st.markdown(
+                                f'''<a href="{wa_client_url}" target="_blank" rel="noopener"
+                                        style="display:block; text-align:center; background:#25D366; color:white;
+                                               font-weight:600; padding:10px 16px; border-radius:8px;
+                                               text-decoration:none; margin-top:4px;">
+                                        📱 Envoyer la notification WhatsApp
+                                    </a>''',
+                                unsafe_allow_html=True
+                            )
+                        else:
+                            st.warning(
+                                "⚠️ Aucun numéro de téléphone enregistré pour cette commande "
+                                "(commande créée avant l'ajout de ce champ) — notification impossible."
+                            )
+                        if st.button("Fermer", key="fermer_notif_statut"):
+                            del st.session_state.dernier_maj_statut
                             st.rerun()
                 else:
                     st.info("Aucune commande enregistrée.")
