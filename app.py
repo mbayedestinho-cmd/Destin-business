@@ -170,12 +170,13 @@ def call_passerelle(payload, timeout=20):
 def load_config(refresh_token=0):
     reponse, err = call_passerelle({"action": "get_config"})
     if err or not reponse or reponse.get("status") != "success":
-        return {"nom_boutique": "Collection Luxe N'Djamena", "whatsapp": "", "logo": "", "email_admin": ""}
+        return {"nom_boutique": "Collection Luxe N'Djamena", "whatsapp": "", "logo": "", "email_admin": "", "seuil_alerte_stock": "3"}
     return {
         "nom_boutique": reponse.get("nom_boutique") or "Collection Luxe N'Djamena",
         "whatsapp": reponse.get("whatsapp") or "",
         "logo": reponse.get("logo") or "",
-        "email_admin": reponse.get("email_admin") or ""
+        "email_admin": reponse.get("email_admin") or "",
+        "seuil_alerte_stock": reponse.get("seuil_alerte_stock") or "3"
     }
 
 config = load_config(st.session_state.get("refresh_token", 0))
@@ -1005,6 +1006,36 @@ with st.sidebar:
                         st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
                     else:
                         st.success("✅ Email de notification mis à jour !")
+                        load_config.clear()
+                        time.sleep(1.2)
+                        st.rerun()
+
+            st.markdown("---")
+            with st.form("form_seuil_stock"):
+                st.markdown("**⚠️ Seuil d'alerte de stock bas**")
+                st.caption(
+                    "Dès qu'un article passe à ce niveau (ou en dessous) suite à une commande, "
+                    "un email d'alerte est envoyé automatiquement à l'adresse ci-dessus, "
+                    "pour prévenir la rupture de stock à l'avance."
+                )
+                try:
+                    valeur_seuil_actuelle = int(float(config.get("seuil_alerte_stock", 3)))
+                except (ValueError, TypeError):
+                    valeur_seuil_actuelle = 3
+                nouveau_seuil = st.number_input(
+                    "Pièces restantes déclenchant l'alerte",
+                    min_value=0, max_value=100, step=1, value=valeur_seuil_actuelle
+                )
+                if st.form_submit_button("💾 Enregistrer le seuil"):
+                    reponse, err = call_passerelle({
+                        "action": "modifier_config",
+                        "password": st.session_state.admin_password,
+                        "nouveau_seuil_alerte_stock": nouveau_seuil
+                    })
+                    if err or not reponse or reponse.get("status") != "success":
+                        st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
+                    else:
+                        st.success("✅ Seuil d'alerte mis à jour !")
                         load_config.clear()
                         time.sleep(1.2)
                         st.rerun()
