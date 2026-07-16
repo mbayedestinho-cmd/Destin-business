@@ -132,6 +132,18 @@ def parse_variants(valeur):
             vues.append(m)
     return vues
 
+def parse_image_list(valeur):
+    """Découpe une liste d'URLs d'images séparées par des virgules (ne coupe PAS sur '/', contrairement à parse_variants)."""
+    if not valeur or str(valeur).strip().lower() in ("", "nan"):
+        return []
+    morceaux = str(valeur).split(",")
+    vues = []
+    for m in morceaux:
+        m = m.strip()
+        if m and m not in vues:
+            vues.append(m)
+    return vues
+
 def upload_image_to_imgbb(file_bytes):
     try:
         b64 = base64.b64encode(file_bytes).decode()
@@ -297,10 +309,22 @@ if not df_f.empty:
             stock = int(row['stock'])
             en_rupture = stock <= 0
 
+            # Galerie : photo principale + photos supplémentaires (colonne "images_supplementaires")
+            galerie = [g for g in (
+                [str(row.get('image', '') or '')] + parse_image_list(row.get('images_supplementaires', ''))
+            ) if g]
+            if not galerie:
+                galerie = ['']
+            cle_galerie = f"galerie_{idx}_{row.get('nom')}"
+            if cle_galerie not in st.session_state:
+                st.session_state[cle_galerie] = 0
+            st.session_state[cle_galerie] = st.session_state[cle_galerie] % len(galerie)
+            image_affichee = galerie[st.session_state[cle_galerie]]
+
             st.markdown(f"""
                 <div class="product-card">
-                    <a href="{row.get('image', '')}" target="_blank">
-                        <img src="{row.get('image', '')}" style="width:100%; border-radius:12px; aspect-ratio:1/1; object-fit:cover;"
+                    <a href="{image_affichee}" target="_blank">
+                        <img src="{image_affichee}" style="width:100%; border-radius:12px; aspect-ratio:1/1; object-fit:cover;"
                              onerror="this.src='https://placehold.co/300x300?text=Image+non+disponible';">
                     </a>
                     <h3>{row['nom']}</h3>
@@ -308,6 +332,22 @@ if not df_f.empty:
                     <div class="{'stock-low' if stock < 5 else 'stock'}">Stock : {stock} pièce(s)</div>
                 </div>
             """, unsafe_allow_html=True)
+
+            if len(galerie) > 1:
+                nav1, nav2, nav3 = st.columns([1, 2, 1])
+                with nav1:
+                    if st.button("◀", key=f"prev_img_{idx}_{row.get('nom')}", use_container_width=True):
+                        st.session_state[cle_galerie] = (st.session_state[cle_galerie] - 1) % len(galerie)
+                        st.rerun()
+                with nav2:
+                    st.markdown(
+                        f"<div style='text-align:center; padding-top:6px;'>Photo {st.session_state[cle_galerie]+1}/{len(galerie)}</div>",
+                        unsafe_allow_html=True
+                    )
+                with nav3:
+                    if st.button("▶", key=f"next_img_{idx}_{row.get('nom')}", use_container_width=True):
+                        st.session_state[cle_galerie] = (st.session_state[cle_galerie] + 1) % len(galerie)
+                        st.rerun()
 
             options_taille = parse_variants(row.get('tailles', ''))
             options_couleur = parse_variants(row.get('couleurs', ''))
@@ -659,7 +699,11 @@ with st.sidebar:
             with st.form("add_form", clear_on_submit=True):
                 nom = st.text_input("Nom de l'article *")
                 prix = st.number_input("Prix (FCFA)", min_value=0, step=1000)
-                uploaded = st.file_uploader("Photo *", type=["jpg", "png", "jpeg"])
+                uploaded = st.file_uploader("Photo principale *", type=["jpg", "png", "jpeg"])
+                photos_supp = st.file_uploader(
+                    "Photos supplémentaires (optionnel)", type=["jpg", "png", "jpeg"],
+                    accept_multiple_files=True, key="add_photos_supp"
+                )
                 tailles = st.text_input("Tailles", "Unique")
                 couleurs = st.text_input("Couleurs", "")
                 categorie = st.text_input("Catégorie", "Vêtements")
@@ -667,17 +711,26 @@ with st.sidebar:
 
                 if st.form_submit_button("Ajouter au catalogue"):
                     if not nom or not uploaded:
-                        st.warning("Nom et photo sont obligatoires.")
+                        st.warning("Nom et photo principale sont obligatoires.")
                     else:
                         with st.spinner("Upload + enregistrement..."):
                             img_url, err = upload_image_to_imgbb(uploaded.getvalue())
                             if err:
                                 st.error(err)
                             else:
+                                urls_supp = []
+                                for fichier_supp in (photos_supp or []):
+                                    url_supp, err_supp = upload_image_to_imgbb(fichier_supp.getvalue())
+                                    if err_supp:
+                                        st.warning(f"⚠️ Une photo supplémentaire n'a pas pu être envoyée : {err_supp}")
+                                    elif url_supp:
+                                        urls_supp.append(url_supp)
+
                                 payload = {
                                     "action": "ajout_article",
                                     "password": st.session_state.admin_password,
                                     "nom": nom, "prix": prix, "image": img_url,
+                                    "images_supplementaires": ", ".join(urls_supp),
                                     "tailles": tailles, "couleurs": couleurs,
                                     "categorie": categorie, "stock": stock
                                 }
@@ -704,11 +757,28 @@ with st.sidebar:
                 with st.form("edit_form"):
                     col_img1, col_img2 = st.columns([1, 2])
                     with col_img1:
-                        st.image(row_edit.get('image', ''), width=120, caption="Photo actuelle")
+                        st.image(row_edit.get('image', ''), width=120, caption="Photo principale actuelle")
                     with col_img2:
                         nouvelle_photo = st.file_uploader(
-                            "Remplacer la photo (optionnel)", type=["jpg", "png", "jpeg"], key="edit_photo"
+                            "Remplacer la photo principale (optionnel)", type=["jpg", "png", "jpeg"], key="edit_photo"
                         )
+
+                    photos_supp_actuelles = parse_image_list(row_edit.get('images_supplementaires', ''))
+                    if photos_supp_actuelles:
+                        st.caption(f"📷 {len(photos_supp_actuelles)} photo(s) supplémentaire(s) actuelle(s) :")
+                        cols_apercu = st.columns(min(len(photos_supp_actuelles), 4))
+                        for i_apercu, url_apercu in enumerate(photos_supp_actuelles[:4]):
+                            with cols_apercu[i_apercu]:
+                                st.image(url_apercu, width=80)
+
+                    supprimer_photos_supp = st.checkbox(
+                        "🗑️ Supprimer toutes les photos supplémentaires actuelles", key="edit_supp_clear"
+                    ) if photos_supp_actuelles else False
+
+                    nouvelles_photos_supp = st.file_uploader(
+                        "Ajouter des photos supplémentaires (optionnel)", type=["jpg", "png", "jpeg"],
+                        accept_multiple_files=True, key="edit_photos_supp"
+                    )
 
                     nouveau_nom = st.text_input("Nom de l'article", value=str(row_edit.get('nom', '')))
                     nouveau_prix = st.number_input(
@@ -737,17 +807,27 @@ with st.sidebar:
                                     st.error(f"Erreur upload photo : {err}")
                                     st.stop()
 
+                            # Liste de départ : vide si l'admin a coché "supprimer", sinon les photos actuelles
+                            liste_supp = [] if supprimer_photos_supp else list(photos_supp_actuelles)
+                            for fichier_supp in (nouvelles_photos_supp or []):
+                                url_supp, err_supp = upload_image_to_imgbb(fichier_supp.getvalue())
+                                if err_supp:
+                                    st.warning(f"⚠️ Une photo supplémentaire n'a pas pu être envoyée : {err_supp}")
+                                elif url_supp:
+                                    liste_supp.append(url_supp)
+
                             payload = {
                                 "action": "modification_article",
                                 "password": st.session_state.admin_password,
                                 "ancien_nom": article_to_edit,
-                                # 🆕 si la colonne "id" existe dans le Google Sheet (ajoutée par la
+                                # si la colonne "id" existe dans le Google Sheet (ajoutée par la
                                 # mise à jour du script), on la transmet pour un matching fiable ;
                                 # sinon le script retombe automatiquement sur "ancien_nom"
                                 "id": str(row_edit.get('id', '') or ''),
                                 "nom": nouveau_nom,
                                 "prix": nouveau_prix,
                                 "image": image_url,
+                                "images_supplementaires": ", ".join(liste_supp),
                                 "tailles": nouvelles_tailles,
                                 "couleurs": nouvelles_couleurs,
                                 "categorie": nouvelle_categorie,
