@@ -504,9 +504,19 @@ with st.sidebar:
                     "articles": st.session_state.cart,
                     "total": total
                 }
-                reponse, err = call_passerelle(payload)
+                # 🔧 FIX : 20s était trop court — le serveur (Apps Script) peut parfois
+                # mettre plus de temps à répondre (démarrage à froid, envoi d'email...),
+                # sans que la commande échoue réellement côté serveur.
+                reponse, err = call_passerelle(payload, timeout=40)
                 if err or not reponse or reponse.get("status") != "success":
-                    st.error(f"❌ Erreur lors de l'enregistrement : {err or (reponse or {}).get('message', 'réponse invalide')}")
+                    # 🔧 FIX : on n'affiche plus l'erreur technique brute au client (illisible
+                    # et anxiogène) — un message clair + une solution de secours immédiate.
+                    st.error(
+                        "❌ La commande met du temps à s'enregistrer. Elle est peut-être "
+                        "quand même passée — pas de souci, tu peux confirmer directement sur "
+                        "WhatsApp en un clic ci-dessous 👇"
+                    )
+                    st.link_button("📲 Envoyer ma commande sur WhatsApp", wa_url, use_container_width=True)
                 else:
                     warnings = (reponse or {}).get("stock_warnings", [])
                     if warnings:
