@@ -145,10 +145,19 @@ def parse_image_list(valeur):
             vues.append(m)
     return vues
 
+# ⚡ FIX PERF : une session HTTP réutilisée pour tous les appels réseau (upload
+# image ImgBB + appels à la passerelle Apps Script). Sans ça, chaque appel
+# ouvrait une nouvelle connexion TLS depuis zéro — un aller-retour réseau
+# supplémentaire à chaque fois, particulièrement pénalisant sur mobile où la
+# latence réseau est plus élevée. Le comportement des fonctions ci-dessous
+# (paramètres, valeurs de retour, gestion d'erreurs) reste rigoureusement
+# identique : seul l'objet qui exécute la requête change.
+_http_session = requests.Session()
+
 def upload_image_to_imgbb(file_bytes):
     try:
         b64 = base64.b64encode(file_bytes).decode()
-        res = requests.post("https://api.imgbb.com/1/upload",
+        res = _http_session.post("https://api.imgbb.com/1/upload",
                            data={"key": IMGBB_API_KEY, "image": b64}, timeout=25)
         if res.status_code != 200:
             return None, "Erreur upload ImgBB"
@@ -158,7 +167,7 @@ def upload_image_to_imgbb(file_bytes):
 
 def call_passerelle(payload, timeout=20):
     try:
-        r = requests.post(URL_PASSERELLE, json=payload, timeout=timeout)
+        r = _http_session.post(URL_PASSERELLE, json=payload, timeout=timeout)
         if r.status_code != 200:
             return None, f"Erreur serveur ({r.status_code})"
         return r.json(), None
@@ -339,7 +348,7 @@ if not df_f.empty:
             st.markdown(f"""
                 <div class="product-card">
                     <a href="{image_affichee}" target="_blank">
-                        <img src="{image_affichee}" style="width:100%; border-radius:12px; aspect-ratio:1/1; object-fit:cover;"
+                        <img src="{image_affichee}" loading="lazy" decoding="async" style="width:100%; border-radius:12px; aspect-ratio:1/1; object-fit:cover;"
                              onerror="this.src='https://placehold.co/300x300?text=Image+non+disponible';">
                     </a>
                     <h3>{row['nom']}</h3>
@@ -404,8 +413,10 @@ if not df_f.empty:
                     })
                 variante = " / ".join(v for v in [taille_choisie, couleur_choisie] if v)
                 label_toast = f"{row['nom']} ({variante})" if variante else row['nom']
+                # ⚡ FIX PERF : le time.sleep(0.6) a été retiré — le toast Streamlit
+                # survit déjà au rerun qui suit (comportement natif), le délai ne
+                # faisait donc que ralentir l'action la plus fréquente des clients.
                 st.toast(f"✅ {label_toast} ajouté au panier !", icon="🛍️")
-                time.sleep(0.6)
                 st.rerun()
 
             # ====================== 🆕 ALERTE RETOUR EN STOCK ======================
