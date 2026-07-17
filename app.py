@@ -580,6 +580,53 @@ with st.sidebar:
                 orders_count = stats.get("orders_count", 0) if stats else 0
                 st.metric("Commandes", orders_count)
 
+            # ====================== 🆕 GRAPHIQUES : ÉVOLUTION DES VENTES + TOP ARTICLES ======================
+            st.markdown("---")
+            st.subheader("📈 Évolution des ventes")
+
+            periode_label = st.radio(
+                "Période", ["7 derniers jours", "30 derniers jours"],
+                horizontal=True, key="periode_dashboard"
+            )
+            jours_periode = 7 if periode_label == "7 derniers jours" else 30
+
+            dash_payload = {
+                "action": "get_dashboard_stats",
+                "password": st.session_state.admin_password,
+                "jours": jours_periode
+            }
+            dash_data, err_dash = call_passerelle(dash_payload)
+
+            if err_dash or not dash_data or dash_data.get("status") != "success":
+                st.warning("Impossible de charger les statistiques du graphique pour le moment.")
+            else:
+                series = dash_data.get("series", [])
+                top_articles = dash_data.get("top_articles", [])
+
+                if series:
+                    df_series = pd.DataFrame(series).set_index("date")
+
+                    col_ca, col_cmd = st.columns(2)
+                    with col_ca:
+                        st.caption("💰 Chiffre d'affaires par jour (FCFA)")
+                        st.line_chart(df_series[["ca"]])
+                    with col_cmd:
+                        st.caption("🧾 Nombre de commandes par jour")
+                        st.bar_chart(df_series[["commandes"]])
+
+                st.markdown("**🏆 Top articles vendus sur la période**")
+                if top_articles:
+                    df_top = pd.DataFrame(top_articles)
+                    df_top_affiche = df_top.rename(columns={
+                        "nom": "Article", "quantite": "Quantité vendue", "ca": "CA généré"
+                    })
+                    df_top_affiche["CA généré"] = df_top_affiche["CA généré"].apply(format_fcfa)
+                    st.dataframe(df_top_affiche, use_container_width=True, hide_index=True)
+
+                    st.bar_chart(df_top.set_index("nom")["quantite"])
+                else:
+                    st.info("Aucune vente enregistrée sur cette période.")
+
             st.markdown("---")
             st.subheader("📋 Dernières Commandes")
             orders_payload = {"action": "get_orders", "password": st.session_state.admin_password, "limit": 15}
