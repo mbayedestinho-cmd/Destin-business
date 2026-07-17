@@ -407,6 +407,33 @@ if not df_f.empty:
                 st.toast(f"✅ {label_toast} ajouté au panier !", icon="🛍️")
                 time.sleep(0.6)
                 st.rerun()
+
+            # ====================== 🆕 ALERTE RETOUR EN STOCK ======================
+            if en_rupture:
+                with st.expander("🔔 Me prévenir quand disponible"):
+                    type_contact = st.radio(
+                        "Comment veux-tu être prévenu(e) ?", ["Email", "Téléphone (WhatsApp)"],
+                        key=f"type_alerte_{idx}_{row.get('nom')}", horizontal=True
+                    )
+                    contact_saisi = st.text_input(
+                        "Email" if type_contact == "Email" else "Numéro de téléphone",
+                        key=f"contact_alerte_{idx}_{row.get('nom')}",
+                        placeholder="ex: nom@email.com" if type_contact == "Email" else "ex: 66 12 34 56"
+                    )
+                    if st.button("🔔 M'alerter", key=f"btn_alerte_{idx}_{row.get('nom')}"):
+                        if not contact_saisi.strip():
+                            st.warning("Merci de renseigner un contact.")
+                        else:
+                            reponse_alerte, err_alerte = call_passerelle({
+                                "action": "inscrire_alerte_stock",
+                                "nom_article": row['nom'],
+                                "contact_type": "email" if type_contact == "Email" else "telephone",
+                                "contact": contact_saisi.strip()
+                            })
+                            if err_alerte or not reponse_alerte or reponse_alerte.get("status") != "success":
+                                st.error(f"❌ {(reponse_alerte or {}).get('message', err_alerte or 'Erreur')}")
+                            else:
+                                st.success(f"✅ {reponse_alerte.get('message', 'Inscription enregistrée')}")
     st.markdown("---")
     afficher_controles_pagination("bas")
 else:
