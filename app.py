@@ -222,18 +222,46 @@ def preparer_selection_articles(df):
     libellé d'affichage qui ne redevient ambigu que si nécessaire (nom +
     repère court) pour que chaque article, même en doublon de nom, reste
     sélectionnable individuellement.
+
+    🔧 FIX (bug réel : liste "Modifier"/"Supprimer" affichant plusieurs fois
+    le même nom sans aucun repère de distinction) : le comptage des doublons
+    comparait les noms au caractère près (`value_counts()` brut). Deux lignes
+    dont le nom ne diffère que par des espaces invisibles (espace en trop,
+    espace de fin, espaces multiples — fréquent après un copier-coller ou une
+    saisie répétée) étaient donc traitées comme des noms DIFFÉRENTS : aucun
+    repère "(ligne N)" n'était ajouté, alors qu'à l'écran elles semblent
+    strictement identiques. On compare maintenant les noms après normalisation
+    des espaces (strip + espaces multiples réduits à un seul) pour détecter
+    ces cas et afficher systématiquement un repère quand deux articles se
+    ressemblent visuellement, même s'ils ne sont pas des doublons "parfaits".
+    🔧 FIX (bug réel, le plus grave : la liste affichait un seul article,
+    répété, à la place de tout le catalogue) : `r.get('id', '')` renvoie la
+    valeur de la colonne 'id' même quand elle est vide — et une cellule vide
+    devient `NaN` en pandas, qui est "vrai" en Python (contrairement à une
+    chaîne vide). `NaN or ''` renvoyait donc `NaN`, converti en la chaîne
+    littérale "nan" pour TOUS les articles sans id renseigné. Tous ces
+    articles se retrouvaient donc avec la MÊME clé ("nan") dans la liste
+    déroulante : Streamlit n'affichait plus qu'un seul libellé (le dernier
+    calculé), répété pour chaque article. Ce même piège avait déjà été
+    corrigé ailleurs (voir get_identifiant ci-dessous) mais pas ici. On
+    utilise maintenant pd.isna() pour détecter correctement une cellule vide.
     Retourne (df_reindexe, liste_de_cles, dict_cle_vers_libelle).
     """
     df2 = df.reset_index(drop=True)
     if df2.empty:
         return df2, [], {}
-    comptes_noms = df2['nom'].astype(str).value_counts()
+    noms_normalises = df2['nom'].astype(str).apply(lambda n: re.sub(r'\s+', ' ', n).strip())
+    comptes_noms = noms_normalises.value_counts()
     cles, labels = [], {}
     for i, r in df2.iterrows():
-        id_r = str(r.get('id', '') or '').strip()
+        id_val = r.get('id', '')
+        if pd.isna(id_val):
+            id_val = ''
+        id_r = str(id_val).strip()
         cle = id_r if id_r else f"_ligne_{i}"
         nom_r = str(r.get('nom', ''))
-        if comptes_noms.get(nom_r, 0) > 1:
+        nom_norm = noms_normalises.iloc[i]
+        if comptes_noms.get(nom_norm, 0) > 1:
             reference = f"#{id_r[-6:]}" if id_r else f"ligne {i + 1}"
             labels[cle] = f"{nom_r} ({reference})"
         else:
