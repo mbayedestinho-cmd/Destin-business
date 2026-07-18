@@ -8,7 +8,6 @@ import time
 import uuid
 import re
 import unicodedata
-import html as _html
 
 st.set_page_config(page_title="Collection Luxe N'Djamena", page_icon="✨", layout="wide")
 
@@ -209,67 +208,6 @@ def get_unique_values(df, col):
         return ["Toutes"]
     return ["Toutes"] + sorted(df[col].dropna().astype(str).unique())
 
-def preparer_selection_articles(df):
-    """🔧 FIX (bug réel : impossible de modifier/supprimer certains articles) :
-    les onglets Modifier/Supprimer construisaient leur liste déroulante à
-    partir des NOMS uniques du catalogue (`.unique()`). Si deux articles
-    partagent exactement le même nom (variantes, doublon de saisie...), ils
-    fusionnaient en une seule entrée dans le menu, et le code prenait
-    toujours la première ligne trouvée pour ce nom — la seconde devenait
-    impossible à sélectionner, donc à modifier ou supprimer.
-    Cette fonction construit à la place une clé réellement unique par ligne
-    (l'id catalogue s'il existe, sinon la position de la ligne), et un
-    libellé d'affichage qui ne redevient ambigu que si nécessaire (nom +
-    repère court) pour que chaque article, même en doublon de nom, reste
-    sélectionnable individuellement.
-
-    🔧 FIX (bug réel : liste "Modifier"/"Supprimer" affichant plusieurs fois
-    le même nom sans aucun repère de distinction) : le comptage des doublons
-    comparait les noms au caractère près (`value_counts()` brut). Deux lignes
-    dont le nom ne diffère que par des espaces invisibles (espace en trop,
-    espace de fin, espaces multiples — fréquent après un copier-coller ou une
-    saisie répétée) étaient donc traitées comme des noms DIFFÉRENTS : aucun
-    repère "(ligne N)" n'était ajouté, alors qu'à l'écran elles semblent
-    strictement identiques. On compare maintenant les noms après normalisation
-    des espaces (strip + espaces multiples réduits à un seul) pour détecter
-    ces cas et afficher systématiquement un repère quand deux articles se
-    ressemblent visuellement, même s'ils ne sont pas des doublons "parfaits".
-    🔧 FIX (bug réel, le plus grave : la liste affichait un seul article,
-    répété, à la place de tout le catalogue) : `r.get('id', '')` renvoie la
-    valeur de la colonne 'id' même quand elle est vide — et une cellule vide
-    devient `NaN` en pandas, qui est "vrai" en Python (contrairement à une
-    chaîne vide). `NaN or ''` renvoyait donc `NaN`, converti en la chaîne
-    littérale "nan" pour TOUS les articles sans id renseigné. Tous ces
-    articles se retrouvaient donc avec la MÊME clé ("nan") dans la liste
-    déroulante : Streamlit n'affichait plus qu'un seul libellé (le dernier
-    calculé), répété pour chaque article. Ce même piège avait déjà été
-    corrigé ailleurs (voir get_identifiant ci-dessous) mais pas ici. On
-    utilise maintenant pd.isna() pour détecter correctement une cellule vide.
-    Retourne (df_reindexe, liste_de_cles, dict_cle_vers_libelle).
-    """
-    df2 = df.reset_index(drop=True)
-    if df2.empty:
-        return df2, [], {}
-    noms_normalises = df2['nom'].astype(str).apply(lambda n: re.sub(r'\s+', ' ', n).strip())
-    comptes_noms = noms_normalises.value_counts()
-    cles, labels = [], {}
-    for i, r in df2.iterrows():
-        id_val = r.get('id', '')
-        if pd.isna(id_val):
-            id_val = ''
-        id_r = str(id_val).strip()
-        cle = id_r if id_r else f"_ligne_{i}"
-        nom_r = str(r.get('nom', ''))
-        nom_norm = noms_normalises.iloc[i]
-        if comptes_noms.get(nom_norm, 0) > 1:
-            reference = f"#{id_r[-6:]}" if id_r else f"ligne {i + 1}"
-            labels[cle] = f"{nom_r} ({reference})"
-        else:
-            labels[cle] = nom_r
-        cles.append(cle)
-    return df2, cles, labels
-
-
 def get_identifiant(row):
     """Identifiant stable d'un produit (son id s'il existe, sinon son nom) —
     utilisé pour la wishlist et la galerie photo, PAS la position de la ligne
@@ -368,21 +306,19 @@ NOM_BOUTIQUE = config["nom_boutique"]
 NUMERO_WHATSAPP = re.sub(r"\D", "", str(config.get("whatsapp") or ""))
 LOGO_URL = config.get("logo") or ""
 
-nom_boutique_echappe = _html.escape(str(NOM_BOUTIQUE))
 if LOGO_URL:
-    logo_url_echappee = _html.escape(str(LOGO_URL), quote=True)
     st.markdown(
         f'''<div class="hero-banner">
-                <img class="hero-bg" src="{logo_url_echappee}">
+                <img class="hero-bg" src="{LOGO_URL}">
                 <div class="hero-content">
-                    <h1>{nom_boutique_echappe}</h1>
+                    <h1>{NOM_BOUTIQUE}</h1>
                     <p>Élégance &amp; Raffinement</p>
                 </div>
             </div>''',
         unsafe_allow_html=True
     )
 else:
-    st.markdown(f'<div class="hero"><h1 class="main-title">{nom_boutique_echappe}</h1></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="hero"><h1 class="main-title">{NOM_BOUTIQUE}</h1></div>', unsafe_allow_html=True)
 
 # ====================== CHARGEMENT DONNÉES ======================
 # ⚠️ FIX : le paramètre ne doit PAS commencer par "_" (Streamlit ignore les
@@ -395,24 +331,19 @@ def load_data(sheet_id, refresh_token=0):
         url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=Catalogue"
         df = pd.read_csv(url)
 
-        # 🔧 FIX AFFICHAGE PROMO / IDENTIFIANT : "id" (9e colonne),
-        # "images_supplementaires" (10e colonne) et "prix_promo" (11e colonne)
-        # sont TOUJOURS écrites à ces positions fixes par Code.gs (ajout_article
-        # / modification_article), quel que soit le texte réellement présent
-        # dans l'en-tête de ces colonnes sur le Sheet. Avant ce correctif, on
-        # ne les retrouvait QUE si leur en-tête correspondait à un nom attendu
-        # — un en-tête vide, mal orthographié ou simplement différent faisait
-        # passer la colonne pour "Unnamed", et elle était supprimée juste en
-        # dessous, avant même d'atteindre calculer_prix_effectif / la sélection
-        # d'article : la promo restait invisible, et surtout l'id disparaissait
-        # complètement (retombant sur un simple index de ligne côté affichage,
-        # et sur une recherche par NOM côté serveur pour modifier/supprimer —
-        # ce qui touchait systématiquement le premier article du même nom au
-        # lieu de celui réellement sélectionné). On fixe maintenant ces trois
-        # noms par POSITION, la seule chose garantie par le script d'écriture.
+        # 🔧 FIX AFFICHAGE PROMO : "images_supplementaires" (10e colonne) et
+        # "prix_promo" (11e colonne) sont TOUJOURS écrites à ces positions
+        # fixes par Code.gs (ajout_article / modification_article), quel que
+        # soit le texte réellement présent dans l'en-tête de ces colonnes sur
+        # le Sheet. Avant ce correctif, on ne les retrouvait QUE si leur
+        # en-tête correspondait à un nom attendu — un en-tête vide, mal
+        # orthographié ou simplement différent ("Prix Promotionnel" au lieu
+        # de "Prix Promo") faisait passer la colonne pour "Unnamed", et elle
+        # était supprimée juste en dessous, avant même d'atteindre
+        # calculer_prix_effectif : la promo restait donc invisible même si
+        # elle était bien enregistrée. On fixe maintenant ces deux noms par
+        # POSITION, qui est la seule chose garantie par le script d'écriture.
         colonnes = list(df.columns)
-        if len(colonnes) > 8:
-            colonnes[8] = "id"
         if len(colonnes) > 9:
             colonnes[9] = "images_supplementaires"
         if len(colonnes) > 10:
@@ -728,23 +659,13 @@ if not df_f.empty:
                 if en_promo else
                 f'<div class="price">{format_fcfa(prix)}</div>'
             )
-            # 🔒 FIX SÉCURITÉ (XSS stocké) : "nom" et les URLs d'image viennent du
-            # Google Sheet (donc potentiellement d'un compte admin compromis, ou
-            # de toute personne ayant accès au classeur) et étaient injectés tels
-            # quels dans un bloc unsafe_allow_html=True. Un nom d'article ou une
-            # URL contenant du HTML/JS (ex: '"><img src=x onerror=...>') aurait pu
-            # exécuter du code dans le navigateur de chaque visiteur du catalogue.
-            # On échappe systématiquement tout ce qui vient du Sheet avant de
-            # l'insérer dans du HTML brut.
-            nom_echappe = _html.escape(str(row['nom']))
-            image_echappee = _html.escape(str(image_affichee), quote=True)
             st.markdown(f"""
                 <div class="product-card">
-                    <a href="{image_echappee}" target="_blank">
-                        <img src="{image_echappee}" style="width:100%; border-radius:12px; aspect-ratio:1/1; object-fit:cover;"
+                    <a href="{image_affichee}" target="_blank">
+                        <img src="{image_affichee}" style="width:100%; border-radius:12px; aspect-ratio:1/1; object-fit:cover;"
                              onerror="this.src='https://placehold.co/300x300?text=Image+non+disponible';">
                     </a>
-                    <h3>{nom_echappe}</h3>
+                    <h3>{row['nom']}</h3>
                     {bloc_prix}
                     <div class="{'stock-low' if stock < 5 else 'stock'}">Stock : {stock} pièce(s)</div>
                 </div>
@@ -923,17 +844,9 @@ with st.sidebar:
 
         if pwd:
             verif, err = call_passerelle({"action": "connexion_admin", "password": pwd})
-            # 🔧 FIX : "admin_input" est un widget à clé fixe — sans ce nettoyage,
-            # Streamlit renvoie la même valeur "pwd" à CHAQUE rerun suivant (le
-            # moindre clic ailleurs sur la page), donc "if pwd:" redevenait vrai
-            # et relançait connexion_admin en boucle : reconnexion silencieuse
-            # après un logout, et surtout re-consommation d'une tentative anti
-            # brute-force à chaque clic après une saisie de mot de passe erronée.
-            del st.session_state["admin_input"]
             if not err and verif and verif.get("status") == "success":
                 st.session_state.admin_logged_in = True
                 st.session_state.admin_token = verif.get("token", "")
-                st.rerun()
             else:
                 st.error("❌ Mot de passe incorrect")
                 st.session_state.admin_logged_in = False
@@ -952,14 +865,12 @@ with st.sidebar:
                 call_passerelle_admin({"action": "deconnexion_admin"})
                 st.session_state.admin_logged_in = False
                 st.session_state.admin_token = ""
-                # 🔧 FIX : le champ "Mot de passe admin" (key="admin_input") garde
-                # sa valeur d'un run à l'autre car c'est un widget Streamlit avec
-                # une clé. Sans ce nettoyage, le prochain rerun réaffichait le
-                # champ encore rempli avec l'ancien mot de passe -> "if pwd:"
-                # redevenait vrai -> reconnexion automatique immédiate, qui
-                # annulait silencieusement la déconnexion qu'on venait de faire.
-                if "admin_input" in st.session_state:
-                    del st.session_state["admin_input"]
+                # 🔧 FIX : sans ça, la déconnexion ne "sortait" pas vraiment de la
+                # page admin. "show_admin_section" (plus bas) reste vrai tant que
+                # l'URL contient "?admin=1", donc l'écran "Mot de passe admin"
+                # réapparaissait immédiatement au lieu de repartir sur la boutique.
+                if "admin" in st.query_params:
+                    del st.query_params["admin"]
                 st.rerun()
 
         # 🔒 FIX SÉCURITÉ : l'email admin n'est plus renvoyé par l'appel
@@ -1336,43 +1247,19 @@ with st.sidebar:
         with tab3:
             st.subheader("✏️ Modifier un article")
             if not df_catalogue.empty:
-                df_edit_ref, cles_edit, labels_edit = preparer_selection_articles(df_catalogue)
-                cle_article = st.selectbox(
-                    "Article à modifier", cles_edit,
-                    format_func=lambda c: labels_edit.get(c, c), key="select_edit"
-                )
+                noms = df_catalogue['nom'].dropna().astype(str).unique().tolist()
+                article_to_edit = st.selectbox("Article à modifier", noms, key="select_edit")
 
-                # Récupère la ligne actuelle de l'article sélectionné, via sa clé
-                # unique (id catalogue, ou position de ligne à défaut) — jamais par
-                # nom seul, pour ne pas retomber systématiquement sur le premier
-                # article en cas de doublon de nom.
-                idx_edit = cles_edit.index(cle_article)
-                row_edit = df_edit_ref.iloc[idx_edit]
-                article_to_edit = str(row_edit.get('nom', ''))
+                # Récupère la ligne actuelle de l'article sélectionné
+                row_edit = df_catalogue[df_catalogue['nom'].astype(str) == article_to_edit].iloc[0]
 
-                # 🩺 DIAGNOSTIC TEMPORAIRE — à retirer une fois le bug de
-                # rafraîchissement confirmé résolu. Affiche ce que le code
-                # calcule réellement, pour vérifier si le décalage vient du
-                # calcul (Python) ou du rendu (Streamlit/navigateur).
-                st.caption(f"🩺 Debug — clé sélectionnée : `{cle_article}` · index ligne : {idx_edit} · nom lu : **{article_to_edit}**")
-
-                # 🔧 FIX (bug réel : "seul le premier article se modifie") : sans clé
-                # unique, Streamlit associe "Nom de l'article", "Prix", etc. à un seul
-                # widget interne qui garde en mémoire les valeurs du PREMIER article
-                # ouvert dans ce formulaire — changer la sélection ne rafraîchissait
-                # donc que la photo (qui n'est pas un widget interactif), pas les
-                # champs texte/nombre. "cle_article" (déjà unique, voir ci-dessus)
-                # sert de suffixe à chaque widget pour forcer une instance distincte
-                # par article, y compris entre deux articles de même nom.
-
-                with st.form(f"edit_form_{cle_article}"):
+                with st.form("edit_form"):
                     col_img1, col_img2 = st.columns([1, 2])
                     with col_img1:
                         st.image(row_edit.get('image', ''), width=120, caption="Photo principale actuelle")
                     with col_img2:
                         nouvelle_photo = st.file_uploader(
-                            "Remplacer la photo principale (optionnel)", type=["jpg", "png", "jpeg"],
-                            key=f"edit_photo_{cle_article}"
+                            "Remplacer la photo principale (optionnel)", type=["jpg", "png", "jpeg"], key="edit_photo"
                         )
 
                     photos_supp_actuelles = parse_image_list(row_edit.get('images_supplementaires', ''))
@@ -1384,21 +1271,18 @@ with st.sidebar:
                                 st.image(url_apercu, width=80)
 
                     supprimer_photos_supp = st.checkbox(
-                        "🗑️ Supprimer toutes les photos supplémentaires actuelles",
-                        key=f"edit_supp_clear_{cle_article}"
+                        "🗑️ Supprimer toutes les photos supplémentaires actuelles", key="edit_supp_clear"
                     ) if photos_supp_actuelles else False
 
                     nouvelles_photos_supp = st.file_uploader(
                         "Ajouter des photos supplémentaires (optionnel)", type=["jpg", "png", "jpeg"],
-                        accept_multiple_files=True, key=f"edit_photos_supp_{cle_article}"
+                        accept_multiple_files=True, key="edit_photos_supp"
                     )
 
-                    nouveau_nom = st.text_input(
-                        "Nom de l'article", value=str(row_edit.get('nom', '')), key=f"edit_nom_{cle_article}"
-                    )
+                    nouveau_nom = st.text_input("Nom de l'article", value=str(row_edit.get('nom', '')))
                     nouveau_prix = st.number_input(
                         "Prix (FCFA)", min_value=0, step=1000,
-                        value=int(row_edit.get('prix_numeric', 0)), key=f"edit_prix_{cle_article}"
+                        value=int(row_edit.get('prix_numeric', 0))
                     )
                     valeur_promo_actuelle = row_edit.get('prix_promo_numeric', None)
                     try:
@@ -1408,20 +1292,19 @@ with st.sidebar:
                     nouveau_prix_promo = st.number_input(
                         "Prix promotionnel (FCFA, optionnel)", min_value=0, step=1000,
                         value=valeur_promo_actuelle,
-                        help="Laisser à 0 pour désactiver la promo. Doit être inférieur au prix normal.",
-                        key=f"edit_prix_promo_{cle_article}"
+                        help="Laisser à 0 pour désactiver la promo. Doit être inférieur au prix normal."
                     )
                     nouvelles_tailles = st.text_input(
-                        "Tailles", value=str(row_edit.get('tailles', '') or ''), key=f"edit_tailles_{cle_article}"
+                        "Tailles", value=str(row_edit.get('tailles', '') or '')
                     )
                     nouvelles_couleurs = st.text_input(
-                        "Couleurs", value=str(row_edit.get('couleurs', '') or ''), key=f"edit_couleurs_{cle_article}"
+                        "Couleurs", value=str(row_edit.get('couleurs', '') or '')
                     )
                     nouvelle_categorie = st.text_input(
-                        "Catégorie", value=str(row_edit.get('categorie', '') or ''), key=f"edit_categorie_{cle_article}"
+                        "Catégorie", value=str(row_edit.get('categorie', '') or '')
                     )
                     nouveau_stock = st.number_input(
-                        "Stock", min_value=0, value=int(row_edit.get('stock', 0)), key=f"edit_stock_{cle_article}"
+                        "Stock", min_value=0, value=int(row_edit.get('stock', 0))
                     )
 
                     if st.form_submit_button("💾 Enregistrer les modifications"):
@@ -1477,15 +1360,13 @@ with st.sidebar:
         with tab4:
             st.subheader("🗑️ Supprimer un article")
             if not df_catalogue.empty:
-                df_suppr_ref, cles_suppr, labels_suppr = preparer_selection_articles(df_catalogue)
-                cle_suppr = st.selectbox(
-                    "Article à supprimer", cles_suppr,
-                    format_func=lambda c: labels_suppr.get(c, c), key="select_delete"
+                article_suppr = st.selectbox(
+                    "Article à supprimer",
+                    df_catalogue['nom'].dropna().astype(str).unique(),
+                    key="select_delete"
                 )
 
-                idx_suppr = cles_suppr.index(cle_suppr)
-                row_suppr = df_suppr_ref.iloc[idx_suppr]
-                article_suppr = str(row_suppr.get('nom', ''))
+                row_suppr = df_catalogue[df_catalogue['nom'].astype(str) == article_suppr].iloc[0]
                 col_prev1, col_prev2 = st.columns([1, 2])
                 with col_prev1:
                     st.image(row_suppr.get('image', ''), width=120)
@@ -1497,11 +1378,9 @@ with st.sidebar:
                 st.warning("⚠️ Cette action est irréversible.")
 
                 # Réinitialise la confirmation si l'utilisateur change d'article
-                # (comparaison sur la clé unique, pas sur le nom qui peut être
-                # partagé par plusieurs articles).
-                if st.session_state.get("last_delete_target") != cle_suppr:
+                if st.session_state.get("last_delete_target") != article_suppr:
                     st.session_state.confirm_delete = False
-                    st.session_state.last_delete_target = cle_suppr
+                    st.session_state.last_delete_target = article_suppr
 
                 if not st.session_state.confirm_delete:
                     if st.button("🗑️ Supprimer cet article", type="primary", use_container_width=True):
