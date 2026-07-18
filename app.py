@@ -367,19 +367,24 @@ def load_data(sheet_id, refresh_token=0):
         url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=Catalogue"
         df = pd.read_csv(url)
 
-        # 🔧 FIX AFFICHAGE PROMO : "images_supplementaires" (10e colonne) et
-        # "prix_promo" (11e colonne) sont TOUJOURS écrites à ces positions
-        # fixes par Code.gs (ajout_article / modification_article), quel que
-        # soit le texte réellement présent dans l'en-tête de ces colonnes sur
-        # le Sheet. Avant ce correctif, on ne les retrouvait QUE si leur
-        # en-tête correspondait à un nom attendu — un en-tête vide, mal
-        # orthographié ou simplement différent ("Prix Promotionnel" au lieu
-        # de "Prix Promo") faisait passer la colonne pour "Unnamed", et elle
-        # était supprimée juste en dessous, avant même d'atteindre
-        # calculer_prix_effectif : la promo restait donc invisible même si
-        # elle était bien enregistrée. On fixe maintenant ces deux noms par
-        # POSITION, qui est la seule chose garantie par le script d'écriture.
+        # 🔧 FIX AFFICHAGE PROMO / IDENTIFIANT : "id" (9e colonne),
+        # "images_supplementaires" (10e colonne) et "prix_promo" (11e colonne)
+        # sont TOUJOURS écrites à ces positions fixes par Code.gs (ajout_article
+        # / modification_article), quel que soit le texte réellement présent
+        # dans l'en-tête de ces colonnes sur le Sheet. Avant ce correctif, on
+        # ne les retrouvait QUE si leur en-tête correspondait à un nom attendu
+        # — un en-tête vide, mal orthographié ou simplement différent faisait
+        # passer la colonne pour "Unnamed", et elle était supprimée juste en
+        # dessous, avant même d'atteindre calculer_prix_effectif / la sélection
+        # d'article : la promo restait invisible, et surtout l'id disparaissait
+        # complètement (retombant sur un simple index de ligne côté affichage,
+        # et sur une recherche par NOM côté serveur pour modifier/supprimer —
+        # ce qui touchait systématiquement le premier article du même nom au
+        # lieu de celui réellement sélectionné). On fixe maintenant ces trois
+        # noms par POSITION, la seule chose garantie par le script d'écriture.
         colonnes = list(df.columns)
+        if len(colonnes) > 8:
+            colonnes[8] = "id"
         if len(colonnes) > 9:
             colonnes[9] = "images_supplementaires"
         if len(colonnes) > 10:
