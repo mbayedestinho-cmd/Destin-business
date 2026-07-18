@@ -1350,6 +1350,12 @@ with st.sidebar:
                 row_edit = df_edit_ref.iloc[idx_edit]
                 article_to_edit = str(row_edit.get('nom', ''))
 
+                # 🩺 DIAGNOSTIC TEMPORAIRE — à retirer une fois le bug de
+                # rafraîchissement confirmé résolu. Affiche ce que le code
+                # calcule réellement, pour vérifier si le décalage vient du
+                # calcul (Python) ou du rendu (Streamlit/navigateur).
+                st.caption(f"🩺 Debug — clé sélectionnée : `{cle_article}` · index ligne : {idx_edit} · nom lu : **{article_to_edit}**")
+
                 # 🔧 FIX (bug réel : "seul le premier article se modifie") : sans clé
                 # unique, Streamlit associe "Nom de l'article", "Prix", etc. à un seul
                 # widget interne qui garde en mémoire les valeurs du PREMIER article
