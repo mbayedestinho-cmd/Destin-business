@@ -145,6 +145,16 @@ if 'confirm_delete' not in st.session_state:
     st.session_state.confirm_delete = False
 if 'admin_token' not in st.session_state:
     st.session_state.admin_token = ""
+if 'pending_cart_toast' not in st.session_state:
+    st.session_state.pending_cart_toast = None
+
+# 🔧 FIX : affiche le toast "ajouté au panier" mémorisé au tour précédent.
+# On ne l'affiche plus directement au moment de l'ajout car la mise à jour
+# de l'URL (persistance du panier) déclenche elle-même un rerun juste après,
+# ce qui "avalait" le toast avant que le téléphone ait le temps de l'afficher.
+if st.session_state.pending_cart_toast:
+    st.toast(st.session_state.pending_cart_toast, icon="🛍️")
+    st.session_state.pending_cart_toast = None
 
 # ====================== HELPERS ======================
 def format_fcfa(n):
@@ -461,7 +471,7 @@ if not df_f.empty:
                     })
                 variante = " / ".join(v for v in [taille_choisie, couleur_choisie] if v)
                 label_toast = f"{row['nom']} ({variante})" if variante else row['nom']
-                st.toast(f"✅ {label_toast} ajouté au panier !", icon="🛍️")
+                st.session_state.pending_cart_toast = f"✅ {label_toast} ajouté au panier !"
                 _synchroniser_panier_url()
                 st.rerun()
 
