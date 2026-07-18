@@ -845,7 +845,10 @@ with st.sidebar:
 
             st.subheader("⚠️ Alertes Stock")
             if not df_catalogue.empty:
-                alerts = df_catalogue[df_catalogue['stock'] < 10].copy()
+                # 🔧 FIX : utilise le vrai seuil configuré (⚙️ Paramètres) au lieu
+                # d'une valeur fixe de 10 qui ne correspondait à rien de réglable.
+                seuil_alerte_dashboard = int(float(config.get("seuil_alerte_stock", 3)))
+                alerts = df_catalogue[df_catalogue['stock'] <= seuil_alerte_dashboard].copy()
                 if not alerts.empty:
                     st.dataframe(alerts[['nom', 'stock', 'prix']].sort_values('stock'),
                                use_container_width=True)
