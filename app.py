@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import urllib.parse
 import base64
+import json
 import time
 import uuid
 import re
@@ -92,17 +93,58 @@ if not all([URL_PASSERELLE, ID_SHEET, IMGBB_API_KEY]):
     st.error("⚠️ Configuration incomplète dans les secrets Streamlit.")
     st.stop()
 
+# ====================== 🆕 PERSISTANCE DU PANIER ======================
+# Objectif : ne plus perdre le panier quand le téléphone met l'onglet en
+# veille (fréquent sur mobile — l'appli WhatsApp prend le dessus, puis
+# Streamlit redémarre une session "fraîche" au retour), ou en cas de
+# rechargement de page. Le panier est encodé dans l'URL (paramètre
+# ?panier=...) : tant que l'onglet garde la même adresse, il est restauré
+# automatiquement au prochain chargement. Il ne survit pas à la fermeture
+# totale du navigateur si l'URL n'a pas été conservée (favori, onglet
+# rouvert) — c'est la seule limite de cette approche, qui ne nécessite
+# aucune dépendance supplémentaire ni changement côté serveur.
+def _encoder_panier(cart):
+    try:
+        if not cart:
+            return ""
+        payload = json.dumps(cart, ensure_ascii=False, separators=(",", ":"))
+        return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
+    except Exception:
+        return ""
+
+def _decoder_panier(valeur):
+    try:
+        if not valeur:
+            return []
+        payload = base64.urlsafe_b64decode(str(valeur).encode("ascii")).decode("utf-8")
+        cart = json.loads(payload)
+        if isinstance(cart, list):
+            return cart
+    except Exception:
+        pass
+    return []
+
+def _synchroniser_panier_url():
+    encode = _encoder_panier(st.session_state.cart)
+    if encode:
+        if st.query_params.get("panier") != encode:
+            st.query_params["panier"] = encode
+    elif "panier" in st.query_params:
+        del st.query_params["panier"]
+
 # ====================== SESSION STATE ======================
 if 'cart' not in st.session_state:
-    st.session_state.cart = []
+    # 🆕 Session toute fraîche : on tente de restaurer le panier depuis l'URL
+    # avant de retomber sur un panier vide.
+    st.session_state.cart = _decoder_panier(st.query_params.get("panier", ""))
 if 'admin_logged_in' not in st.session_state:
     st.session_state.admin_logged_in = False
 if 'refresh_token' not in st.session_state:
     st.session_state.refresh_token = 0
 if 'confirm_delete' not in st.session_state:
     st.session_state.confirm_delete = False
-if 'admin_password' not in st.session_state:
-    st.session_state.admin_password = ""
+if 'admin_token' not in st.session_state:
+    st.session_state.admin_token = ""
 
 # ====================== HELPERS ======================
 def format_fcfa(n):
@@ -145,19 +187,10 @@ def parse_image_list(valeur):
             vues.append(m)
     return vues
 
-# ⚡ FIX PERF : une session HTTP réutilisée pour tous les appels réseau (upload
-# image ImgBB + appels à la passerelle Apps Script). Sans ça, chaque appel
-# ouvrait une nouvelle connexion TLS depuis zéro — un aller-retour réseau
-# supplémentaire à chaque fois, particulièrement pénalisant sur mobile où la
-# latence réseau est plus élevée. Le comportement des fonctions ci-dessous
-# (paramètres, valeurs de retour, gestion d'erreurs) reste rigoureusement
-# identique : seul l'objet qui exécute la requête change.
-_http_session = requests.Session()
-
 def upload_image_to_imgbb(file_bytes):
     try:
         b64 = base64.b64encode(file_bytes).decode()
-        res = _http_session.post("https://api.imgbb.com/1/upload",
+        res = requests.post("https://api.imgbb.com/1/upload",
                            data={"key": IMGBB_API_KEY, "image": b64}, timeout=25)
         if res.status_code != 200:
             return None, "Erreur upload ImgBB"
@@ -167,12 +200,27 @@ def upload_image_to_imgbb(file_bytes):
 
 def call_passerelle(payload, timeout=20):
     try:
-        r = _http_session.post(URL_PASSERELLE, json=payload, timeout=timeout)
+        r = requests.post(URL_PASSERELLE, json=payload, timeout=timeout)
         if r.status_code != 200:
             return None, f"Erreur serveur ({r.status_code})"
         return r.json(), None
     except Exception as e:
         return None, str(e)
+
+# 🔧 FIX SÉCURITÉ : à utiliser pour toutes les actions admin (au lieu de
+# call_passerelle direct). Injecte automatiquement le jeton de session — le
+# mot de passe, lui, n'est plus jamais renvoyé après la connexion initiale.
+# Si le jeton a expiré (session de plus de 6h), on déconnecte proprement et
+# on redemande le mot de passe, plutôt que d'afficher une erreur incompréhensible.
+def call_passerelle_admin(payload, timeout=20):
+    payload = {**payload, "token": st.session_state.admin_token}
+    reponse, err = call_passerelle(payload, timeout=timeout)
+    if reponse and reponse.get("session_expiree"):
+        st.session_state.admin_logged_in = False
+        st.session_state.admin_token = ""
+        st.warning("🔒 Session expirée, merci de te reconnecter.")
+        st.rerun()
+    return reponse, err
 
 # ====================== CHARGEMENT CONFIG (nom boutique / whatsapp) ======================
 @st.cache_data(ttl=90, show_spinner=False)
@@ -348,7 +396,7 @@ if not df_f.empty:
             st.markdown(f"""
                 <div class="product-card">
                     <a href="{image_affichee}" target="_blank">
-                        <img src="{image_affichee}" loading="lazy" decoding="async" style="width:100%; border-radius:12px; aspect-ratio:1/1; object-fit:cover;"
+                        <img src="{image_affichee}" style="width:100%; border-radius:12px; aspect-ratio:1/1; object-fit:cover;"
                              onerror="this.src='https://placehold.co/300x300?text=Image+non+disponible';">
                     </a>
                     <h3>{row['nom']}</h3>
@@ -413,10 +461,8 @@ if not df_f.empty:
                     })
                 variante = " / ".join(v for v in [taille_choisie, couleur_choisie] if v)
                 label_toast = f"{row['nom']} ({variante})" if variante else row['nom']
-                # ⚡ FIX PERF : le time.sleep(0.6) a été retiré — le toast Streamlit
-                # survit déjà au rerun qui suit (comportement natif), le délai ne
-                # faisait donc que ralentir l'action la plus fréquente des clients.
                 st.toast(f"✅ {label_toast} ajouté au panier !", icon="🛍️")
+                _synchroniser_panier_url()
                 st.rerun()
 
             # ====================== 🆕 ALERTE RETOUR EN STOCK ======================
@@ -469,11 +515,16 @@ with st.sidebar:
             with c3:
                 if st.button("🗑️", key=f"del_{item['id']}"):
                     st.session_state.cart = [i for i in st.session_state.cart if i['id'] != item['id']]
+                    _synchroniser_panier_url()
                     st.rerun()
 
         # Recalcul APRÈS mise à jour des quantités par les number_input ci-dessus
         nb_articles = sum(item['quantite'] for item in st.session_state.cart)
         total = sum(item['prix'] * item['quantite'] for item in st.session_state.cart)
+        # 🆕 Les changements de quantité ne passent pas par st.rerun() explicite
+        # (le widget number_input redéclenche l'exécution tout seul) — on
+        # resynchronise donc l'URL ici, à chaque exécution du script.
+        _synchroniser_panier_url()
         header_placeholder.header(f"🛍️ Mon Panier ({nb_articles})")
         total_placeholder.success(f"**Total : {format_fcfa(total)}**")
 
@@ -509,7 +560,6 @@ with st.sidebar:
             with st.spinner("Enregistrement..."):
                 payload = {
                     "action": "nouvelle_commande",
-                    "password": st.session_state.admin_password,
                     "client_nom": client_nom_saisi.strip(),
                     "client_telephone": re.sub(r"\D", "", client_telephone_saisi),
                     "articles": st.session_state.cart,
@@ -542,6 +592,7 @@ with st.sidebar:
                         )
                     load_data.clear()  # le stock a été décrémenté côté serveur
                     st.session_state.cart = []
+                    _synchroniser_panier_url()
                     st.session_state.refresh_token += 1
                     st.markdown(
                         f'''<a href="{wa_url}" target="_blank" rel="noopener"
@@ -599,11 +650,11 @@ with st.sidebar:
             verif, err = call_passerelle({"action": "connexion_admin", "password": pwd})
             if not err and verif and verif.get("status") == "success":
                 st.session_state.admin_logged_in = True
-                st.session_state.admin_password = pwd
+                st.session_state.admin_token = verif.get("token", "")
             else:
                 st.error("❌ Mot de passe incorrect")
                 st.session_state.admin_logged_in = False
-                st.session_state.admin_password = ""
+                st.session_state.admin_token = ""
 
     if st.session_state.admin_logged_in:
         tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Dashboard", "➕ Ajouter", "✏️ Modifier", "🗑️ Supprimer", "⚙️ Paramètres"])
@@ -619,8 +670,8 @@ with st.sidebar:
                 st.metric("Stock faible (< 5)", low_stock)
 
             with col3:
-                stats_payload = {"action": "get_stats", "password": st.session_state.admin_password}
-                stats, _ = call_passerelle(stats_payload)
+                stats_payload = {"action": "get_stats"}
+                stats, _ = call_passerelle_admin(stats_payload)
                 total_sales = stats.get("total_sales", 0) if stats else 0
                 st.metric("CA Total", format_fcfa(total_sales))
 
@@ -640,10 +691,9 @@ with st.sidebar:
 
             dash_payload = {
                 "action": "get_dashboard_stats",
-                "password": st.session_state.admin_password,
                 "jours": jours_periode
             }
-            dash_data, err_dash = call_passerelle(dash_payload)
+            dash_data, err_dash = call_passerelle_admin(dash_payload)
 
             if err_dash or not dash_data or dash_data.get("status") != "success":
                 st.warning("Impossible de charger les statistiques du graphique pour le moment.")
@@ -677,8 +727,8 @@ with st.sidebar:
 
             st.markdown("---")
             st.subheader("📋 Dernières Commandes")
-            orders_payload = {"action": "get_orders", "password": st.session_state.admin_password, "limit": 15}
-            orders_data, err = call_passerelle(orders_payload)
+            orders_payload = {"action": "get_orders", "limit": 15}
+            orders_data, err = call_passerelle_admin(orders_payload)
 
             if orders_data and orders_data.get("status") == "success":
                 orders_list = orders_data.get("orders", [])
@@ -721,7 +771,6 @@ with st.sidebar:
                         commande_cible = orders_list[commande_choisie]
                         payload_statut = {
                             "action": "modifier_statut_commande",
-                            "password": st.session_state.admin_password,
                             "nouveau_statut": nouveau_statut
                         }
                         # Priorité à l'id_commande ; sinon on retombe sur la date exacte
@@ -731,7 +780,7 @@ with st.sidebar:
                         else:
                             payload_statut["date"] = commande_cible.get("date")
 
-                        reponse, err = call_passerelle(payload_statut)
+                        reponse, err = call_passerelle_admin(payload_statut)
                         if err or not reponse or reponse.get("status") != "success":
                             st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
                         else:
@@ -838,20 +887,18 @@ with st.sidebar:
 
                                 payload = {
                                     "action": "ajout_article",
-                                    "password": st.session_state.admin_password,
                                     "nom": nom, "prix": prix, "image": img_url,
                                     "images_supplementaires": ", ".join(urls_supp),
                                     "tailles": tailles, "couleurs": couleurs,
                                     "categorie": categorie, "stock": stock
                                 }
-                                reponse, err = call_passerelle(payload)
+                                reponse, err = call_passerelle_admin(payload)
                                 if err or not reponse or reponse.get("status") != "success":
                                     st.error(f"❌ Erreur : {err or (reponse or {}).get('message', 'réponse invalide')}")
                                 else:
-                                    st.success("✅ Article ajouté !")
+                                    st.toast("✅ Article ajouté !")
                                     load_data.clear()  # 🔧 FIX cache
                                     st.session_state.refresh_token += 1
-                                    time.sleep(1.5)
                                     st.rerun()
 
         # ====================== MODIFIER ======================
@@ -928,7 +975,6 @@ with st.sidebar:
 
                             payload = {
                                 "action": "modification_article",
-                                "password": st.session_state.admin_password,
                                 "ancien_nom": article_to_edit,
                                 # si la colonne "id" existe dans le Google Sheet (ajoutée par la
                                 # mise à jour du script), on la transmet pour un matching fiable ;
@@ -943,14 +989,13 @@ with st.sidebar:
                                 "categorie": nouvelle_categorie,
                                 "stock": nouveau_stock
                             }
-                            reponse, err = call_passerelle(payload)
+                            reponse, err = call_passerelle_admin(payload)
                             if err or not reponse or reponse.get("status") != "success":
                                 st.error(f"❌ Erreur lors de la mise à jour : {err or (reponse or {}).get('message', 'réponse invalide')}")
                             else:
-                                st.success("✅ Article mis à jour !")
+                                st.toast("✅ Article mis à jour !")
                                 load_data.clear()  # 🔧 FIX cache
                                 st.session_state.refresh_token += 1
-                                time.sleep(1.5)
                                 st.rerun()
             else:
                 st.info("Aucun article disponible.")
@@ -993,20 +1038,18 @@ with st.sidebar:
                             with st.spinner("Suppression en cours..."):
                                 payload = {
                                     "action": "suppression_article",
-                                    "password": st.session_state.admin_password,
                                     "nom": article_suppr,
                                     # 🆕 idem : transmet l'id si disponible, sinon fallback sur "nom"
                                     "id": str(row_suppr.get('id', '') or '')
                                 }
-                                reponse, err = call_passerelle(payload)
+                                reponse, err = call_passerelle_admin(payload)
                                 if err or not reponse or reponse.get("status") != "success":
                                     st.error(f"❌ Erreur lors de la suppression : {err or (reponse or {}).get('message', '')}")
                                 else:
-                                    st.success("✅ Article supprimé !")
+                                    st.toast("✅ Article supprimé !")
                                     load_data.clear()  # 🔧 FIX cache
                                     st.session_state.refresh_token += 1
                                     st.session_state.confirm_delete = False
-                                    time.sleep(1.5)
                                     st.rerun()
                     with col_conf2:
                         if st.button("❌ Annuler", use_container_width=True):
@@ -1024,17 +1067,15 @@ with st.sidebar:
                 st.markdown("**Nom de la boutique**")
                 nouveau_nom_boutique = st.text_input("Nom affiché en haut de l'appli", value=NOM_BOUTIQUE)
                 if st.form_submit_button("💾 Enregistrer le nom"):
-                    reponse, err = call_passerelle({
+                    reponse, err = call_passerelle_admin({
                         "action": "modifier_config",
-                        "password": st.session_state.admin_password,
                         "nouveau_nom_boutique": nouveau_nom_boutique
                     })
                     if err or not reponse or reponse.get("status") != "success":
                         st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
                     else:
-                        st.success("✅ Nom de la boutique mis à jour !")
+                        st.toast("✅ Nom de la boutique mis à jour !")
                         load_config.clear()
-                        time.sleep(1.2)
                         st.rerun()
 
             st.markdown("---")
@@ -1050,17 +1091,15 @@ with st.sidebar:
                 if err_img or not url_logo:
                     st.error(f"❌ Erreur lors de l'envoi de l'image : {err_img or 'inconnue'}")
                 else:
-                    reponse, err = call_passerelle({
+                    reponse, err = call_passerelle_admin({
                         "action": "modifier_config",
-                        "password": st.session_state.admin_password,
                         "nouveau_logo": url_logo
                     })
                     if err or not reponse or reponse.get("status") != "success":
                         st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
                     else:
-                        st.success("✅ Logo mis à jour !")
+                        st.toast("✅ Logo mis à jour !")
                         load_config.clear()
-                        time.sleep(1.2)
                         st.rerun()
 
             st.markdown("---")
@@ -1071,17 +1110,15 @@ with st.sidebar:
                     value=config["whatsapp"]
                 )
                 if st.form_submit_button("💾 Enregistrer le numéro"):
-                    reponse, err = call_passerelle({
+                    reponse, err = call_passerelle_admin({
                         "action": "modifier_config",
-                        "password": st.session_state.admin_password,
                         "nouveau_whatsapp": re.sub(r"\D", "", nouveau_whatsapp)
                     })
                     if err or not reponse or reponse.get("status") != "success":
                         st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
                     else:
-                        st.success("✅ Numéro WhatsApp mis à jour !")
+                        st.toast("✅ Numéro WhatsApp mis à jour !")
                         load_config.clear()
-                        time.sleep(1.2)
                         st.rerun()
 
             st.markdown("---")
@@ -1093,17 +1130,15 @@ with st.sidebar:
                     value=config.get("email_admin", "")
                 )
                 if st.form_submit_button("💾 Enregistrer l'email"):
-                    reponse, err = call_passerelle({
+                    reponse, err = call_passerelle_admin({
                         "action": "modifier_config",
-                        "password": st.session_state.admin_password,
                         "nouveau_email_admin": nouvel_email_admin.strip()
                     })
                     if err or not reponse or reponse.get("status") != "success":
                         st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
                     else:
-                        st.success("✅ Email de notification mis à jour !")
+                        st.toast("✅ Email de notification mis à jour !")
                         load_config.clear()
-                        time.sleep(1.2)
                         st.rerun()
 
             st.markdown("---")
@@ -1123,17 +1158,15 @@ with st.sidebar:
                     min_value=0, max_value=100, step=1, value=valeur_seuil_actuelle
                 )
                 if st.form_submit_button("💾 Enregistrer le seuil"):
-                    reponse, err = call_passerelle({
+                    reponse, err = call_passerelle_admin({
                         "action": "modifier_config",
-                        "password": st.session_state.admin_password,
                         "nouveau_seuil_alerte_stock": nouveau_seuil
                     })
                     if err or not reponse or reponse.get("status") != "success":
                         st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
                     else:
-                        st.success("✅ Seuil d'alerte mis à jour !")
+                        st.toast("✅ Seuil d'alerte mis à jour !")
                         load_config.clear()
-                        time.sleep(1.2)
                         st.rerun()
 
             st.markdown("---")
@@ -1152,17 +1185,15 @@ with st.sidebar:
                     min_value=0, max_value=23, step=1, value=valeur_heure_actuelle
                 )
                 if st.form_submit_button("💾 Enregistrer l'heure"):
-                    reponse, err = call_passerelle({
+                    reponse, err = call_passerelle_admin({
                         "action": "modifier_config",
-                        "password": st.session_state.admin_password,
                         "nouvelle_heure_bilan_quotidien": nouvelle_heure
                     })
                     if err or not reponse or reponse.get("status") != "success":
                         st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
                     else:
-                        st.success(f"✅ Bilan quotidien réglé sur {nouvelle_heure}h !")
+                        st.toast(f"✅ Bilan quotidien réglé sur {nouvelle_heure}h !")
                         load_config.clear()
-                        time.sleep(1.2)
                         st.rerun()
 
             st.markdown("---")
@@ -1176,14 +1207,11 @@ with st.sidebar:
                     elif nouveau_mdp != confirmation_mdp:
                         st.warning("Les deux mots de passe ne correspondent pas.")
                     else:
-                        reponse, err = call_passerelle({
+                        reponse, err = call_passerelle_admin({
                             "action": "modifier_config",
-                            "password": st.session_state.admin_password,
                             "nouveau_mot_de_passe": nouveau_mdp
                         })
                         if err or not reponse or reponse.get("status") != "success":
                             st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
                         else:
                             st.success("✅ Mot de passe mis à jour ! Reconnecte-toi avec le nouveau mot de passe la prochaine fois.")
-                            st.session_state.admin_password = nouveau_mdp
-                            time.sleep(1.5)
