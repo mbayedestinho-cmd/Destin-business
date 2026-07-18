@@ -385,11 +385,18 @@ if not df_f.empty:
     afficher_controles_pagination("haut")
     st.markdown("")
     cols = st.columns(3)
-    for idx, row in df_page.iterrows():
-        with cols[idx % 3]:
+    for pos, (idx, row) in enumerate(df_page.iterrows()):
+        with cols[pos % 3]:
             prix = int(row['prix_numeric'])
             stock = int(row['stock'])
             en_rupture = stock <= 0
+
+            # 🔧 FIX STABILITÉ GALERIE : identifiant stable du produit (l'id de
+            # la fiche s'il existe, sinon son nom) — PAS la position de la ligne
+            # dans le tableau, qui change à chaque tri/filtre/ajout/suppression
+            # d'article et faisait dériver la photo affichée vers le mauvais
+            # article après coup.
+            identifiant_produit = str(row.get('id', '') or '').strip() or str(row.get('nom', ''))
 
             # Galerie : photo principale + photos supplémentaires (colonne "images_supplementaires")
             galerie = [g for g in (
@@ -397,7 +404,7 @@ if not df_f.empty:
             ) if g]
             if not galerie:
                 galerie = ['']
-            cle_galerie = f"galerie_{idx}_{row.get('nom')}"
+            cle_galerie = f"galerie_{identifiant_produit}"
             if cle_galerie not in st.session_state:
                 st.session_state[cle_galerie] = 0
             st.session_state[cle_galerie] = st.session_state[cle_galerie] % len(galerie)
