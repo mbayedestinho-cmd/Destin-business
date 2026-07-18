@@ -195,6 +195,11 @@ if st.session_state.pending_cart_toast:
 def format_fcfa(n):
     return f"{int(n):,} FCFA".replace(",", " ")
 
+def format_etoiles(moyenne):
+    """Affiche une moyenne (ex: 4.3) sous forme d'étoiles pleines/vides."""
+    pleines = round(moyenne)
+    return "⭐" * pleines + "☆" * (5 - pleines)
+
 def normalize_col(col):
     """Met en minuscule, remplace les espaces par des underscores et supprime les accents d'un nom de colonne."""
     col = str(col).lower().strip()
@@ -301,6 +306,25 @@ def load_config(refresh_token=0):
         "delai_relance_panier_minutes": reponse.get("delai_relance_panier_minutes") or "60"
     }
 
+# ====================== 🆕 CHARGEMENT AVIS CLIENTS (moyennes) ======================
+# Un seul appel pour récupérer la note moyenne + le nombre d'avis de TOUS
+# les articles d'un coup (affiché sur chaque fiche produit), plutôt qu'un
+# appel par article. Le détail des avis d'un article précis (commentaires)
+# est chargé séparément, seulement quand le client ouvre "⭐ Avis clients".
+@st.cache_data(ttl=90, show_spinner=False)
+def load_avis_moyennes(refresh_token=0):
+    reponse, err = call_passerelle({"action": "get_avis"})
+    if err or not reponse or reponse.get("status") != "success":
+        return {}
+    return reponse.get("moyennes", {})
+
+@st.cache_data(ttl=30, show_spinner=False)
+def load_avis_article(article_id, refresh_token=0):
+    reponse, err = call_passerelle({"action": "get_avis", "article_id": article_id, "limit": 20})
+    if err or not reponse or reponse.get("status") != "success":
+        return []
+    return reponse.get("avis", [])
+
 config = load_config(st.session_state.get("refresh_token", 0))
 NOM_BOUTIQUE = config["nom_boutique"]
 NUMERO_WHATSAPP = re.sub(r"\D", "", str(config.get("whatsapp") or ""))
@@ -392,6 +416,7 @@ def calculer_prix_effectif(df):
 df_catalogue = load_data(ID_SHEET, st.session_state.refresh_token)
 df_catalogue = uniformiser_colonne_images_supp(df_catalogue)
 df_catalogue = calculer_prix_effectif(df_catalogue)
+avis_moyennes = load_avis_moyennes(st.session_state.refresh_token)
 
 # ====================== FILTRES ======================
 st.subheader("Notre Collection")
@@ -639,6 +664,17 @@ if not df_f.empty:
             # article après coup.
             identifiant_produit = get_identifiant(row)
 
+            # 🆕 AVIS CLIENTS : note moyenne + nombre d'avis de cet article (déjà
+            # chargés en une seule fois pour tout le catalogue dans avis_moyennes).
+            info_avis = avis_moyennes.get(identifiant_produit) or avis_moyennes.get(row['nom'])
+            bloc_avis = (
+                f'<div style="margin-top:4px; font-size:0.9rem; color:#b58328;">'
+                f'{format_etoiles(info_avis["moyenne"])} '
+                f'<span style="color:#666;">{info_avis["moyenne"]} ({info_avis["count"]} avis)</span></div>'
+                if info_avis else
+                '<div style="margin-top:4px; font-size:0.85rem; color:#999;">Aucun avis pour le moment</div>'
+            )
+
             # Galerie : photo principale + photos supplémentaires (colonne "images_supplementaires")
             galerie = [g for g in (
                 [str(row.get('image', '') or '')] + parse_image_list(row.get('images_supplementaires', ''))
@@ -668,6 +704,7 @@ if not df_f.empty:
                     <h3>{row['nom']}</h3>
                     {bloc_prix}
                     <div class="{'stock-low' if stock < 5 else 'stock'}">Stock : {stock} pièce(s)</div>
+                    {bloc_avis}
                 </div>
             """, unsafe_allow_html=True)
 
@@ -722,6 +759,46 @@ if not df_f.empty:
                     st.caption(f"Tailles disponibles : {', '.join(options_taille)}")
                 if options_couleur := parse_variants(row.get('couleurs', '')):
                     st.caption(f"Couleurs disponibles : {', '.join(options_couleur)}")
+
+            # ====================== 🆕 AVIS CLIENTS ======================
+            libelle_avis = f"⭐ Avis clients ({info_avis['count']})" if info_avis else "⭐ Laisser un avis"
+            with st.expander(libelle_avis):
+                if info_avis:
+                    st.markdown(f"**{format_etoiles(info_avis['moyenne'])} {info_avis['moyenne']}/5** — {info_avis['count']} avis")
+                    for avis_item in load_avis_article(identifiant_produit, st.session_state.refresh_token):
+                        st.markdown(f"{format_etoiles(avis_item.get('note', 0))} — **{avis_item.get('client_nom', '')}**")
+                        if avis_item.get('commentaire'):
+                            st.caption(avis_item['commentaire'])
+                    st.markdown("---")
+                else:
+                    st.caption("Aucun avis pour le moment. Soyez le premier à donner votre avis !")
+
+                with st.form(f"form_avis_{idx}_{row.get('nom')}", clear_on_submit=True):
+                    avis_nom = st.text_input("Votre nom", key=f"avis_nom_{idx}_{row.get('nom')}")
+                    avis_note_label = st.select_slider(
+                        "Votre note", options=["⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"],
+                        value="⭐⭐⭐⭐⭐", key=f"avis_note_{idx}_{row.get('nom')}"
+                    )
+                    avis_commentaire = st.text_area(
+                        "Votre commentaire (facultatif)", max_chars=500,
+                        key=f"avis_comment_{idx}_{row.get('nom')}"
+                    )
+                    if st.form_submit_button("📨 Envoyer mon avis"):
+                        if not avis_nom.strip():
+                            st.warning("Merci de renseigner votre nom.")
+                        else:
+                            reponse_avis, err_avis = call_passerelle({
+                                "action": "laisser_avis",
+                                "article_id": identifiant_produit,
+                                "article_nom": row['nom'],
+                                "client_nom": avis_nom.strip(),
+                                "note": avis_note_label.count("⭐"),
+                                "commentaire": avis_commentaire.strip()
+                            })
+                            if err_avis or not reponse_avis or reponse_avis.get("status") != "success":
+                                st.error(f"❌ {(reponse_avis or {}).get('message', err_avis or 'Erreur')}")
+                            else:
+                                st.success(f"✅ {reponse_avis.get('message', 'Avis envoyé')}")
 
             options_taille = parse_variants(row.get('tailles', ''))
             options_couleur = parse_variants(row.get('couleurs', ''))
@@ -882,7 +959,7 @@ with st.sidebar:
         if config_admin and config_admin.get("status") == "success":
             config = {**config, "email_admin": config_admin.get("email_admin", "")}
 
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Dashboard", "➕ Ajouter", "✏️ Modifier", "🗑️ Supprimer", "⚙️ Paramètres"])
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Dashboard", "➕ Ajouter", "✏️ Modifier", "🗑️ Supprimer", "⚙️ Paramètres", "⭐ Avis"])
 
         with tab1:  # DASHBOARD
             st.subheader("📊 Tableau de Bord")
@@ -1606,3 +1683,79 @@ with st.sidebar:
                             st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
                         else:
                             st.success("✅ Mot de passe mis à jour ! Reconnecte-toi avec le nouveau mot de passe la prochaine fois.")
+
+        # ====================== 🆕 MODÉRATION DES AVIS CLIENTS ======================
+        with tab6:
+            st.subheader("⭐ Modération des avis clients")
+            st.caption(
+                "Les avis laissés par les clients apparaissent d'abord ici, en attente. "
+                "Approuve-les pour qu'ils deviennent visibles sur la boutique, ou supprime "
+                "ceux qui ne conviennent pas."
+            )
+            avis_data, err_avis_admin = call_passerelle_admin({"action": "get_avis_admin"})
+            if err_avis_admin or not avis_data or avis_data.get("status") != "success":
+                st.warning("Impossible de charger les avis pour le moment.")
+            else:
+                tous_avis = avis_data.get("avis", [])
+                avis_en_attente = [a for a in tous_avis if a.get("statut") != "approuve"]
+                avis_approuves = [a for a in tous_avis if a.get("statut") == "approuve"]
+
+                st.markdown(f"**⏳ En attente de validation ({len(avis_en_attente)})**")
+                if not avis_en_attente:
+                    st.success("✅ Aucun avis en attente.")
+                else:
+                    for avis_a in avis_en_attente:
+                        with st.container():
+                            st.markdown(
+                                f"{format_etoiles(avis_a.get('note', 0))} — **{avis_a.get('article_nom', '')}** "
+                                f"— par {avis_a.get('client_nom', '')}"
+                            )
+                            if avis_a.get("commentaire"):
+                                st.caption(avis_a["commentaire"])
+                            col_approuver, col_supprimer = st.columns(2)
+                            with col_approuver:
+                                if st.button("✅ Approuver", key=f"approuver_{avis_a.get('id')}", use_container_width=True):
+                                    rep, err = call_passerelle_admin({
+                                        "action": "moderer_avis", "id_avis": avis_a.get("id"), "decision": "approuver"
+                                    })
+                                    if err or not rep or rep.get("status") != "success":
+                                        st.error(f"❌ {(rep or {}).get('message', err or 'Erreur')}")
+                                    else:
+                                        st.toast("✅ Avis approuvé !")
+                                        load_avis_moyennes.clear()
+                                        st.rerun()
+                            with col_supprimer:
+                                if st.button("🗑️ Supprimer", key=f"supprimer_attente_{avis_a.get('id')}", use_container_width=True):
+                                    rep, err = call_passerelle_admin({
+                                        "action": "moderer_avis", "id_avis": avis_a.get("id"), "decision": "supprimer"
+                                    })
+                                    if err or not rep or rep.get("status") != "success":
+                                        st.error(f"❌ {(rep or {}).get('message', err or 'Erreur')}")
+                                    else:
+                                        st.toast("🗑️ Avis supprimé.")
+                                        st.rerun()
+                            st.markdown("---")
+
+                st.markdown(f"**✅ Avis publiés ({len(avis_approuves)})**")
+                if not avis_approuves:
+                    st.caption("Aucun avis publié pour le moment.")
+                else:
+                    for avis_p in avis_approuves:
+                        with st.container():
+                            st.markdown(
+                                f"{format_etoiles(avis_p.get('note', 0))} — **{avis_p.get('article_nom', '')}** "
+                                f"— par {avis_p.get('client_nom', '')}"
+                            )
+                            if avis_p.get("commentaire"):
+                                st.caption(avis_p["commentaire"])
+                            if st.button("🗑️ Retirer de la boutique", key=f"supprimer_publie_{avis_p.get('id')}"):
+                                rep, err = call_passerelle_admin({
+                                    "action": "moderer_avis", "id_avis": avis_p.get("id"), "decision": "supprimer"
+                                })
+                                if err or not rep or rep.get("status") != "success":
+                                    st.error(f"❌ {(rep or {}).get('message', err or 'Erreur')}")
+                                else:
+                                    st.toast("🗑️ Avis retiré.")
+                                    load_avis_moyennes.clear()
+                                    st.rerun()
+                            st.markdown("---")
