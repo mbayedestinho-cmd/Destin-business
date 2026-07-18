@@ -209,6 +209,39 @@ def get_unique_values(df, col):
         return ["Toutes"]
     return ["Toutes"] + sorted(df[col].dropna().astype(str).unique())
 
+def preparer_selection_articles(df):
+    """🔧 FIX (bug réel : impossible de modifier/supprimer certains articles) :
+    les onglets Modifier/Supprimer construisaient leur liste déroulante à
+    partir des NOMS uniques du catalogue (`.unique()`). Si deux articles
+    partagent exactement le même nom (variantes, doublon de saisie...), ils
+    fusionnaient en une seule entrée dans le menu, et le code prenait
+    toujours la première ligne trouvée pour ce nom — la seconde devenait
+    impossible à sélectionner, donc à modifier ou supprimer.
+    Cette fonction construit à la place une clé réellement unique par ligne
+    (l'id catalogue s'il existe, sinon la position de la ligne), et un
+    libellé d'affichage qui ne redevient ambigu que si nécessaire (nom +
+    repère court) pour que chaque article, même en doublon de nom, reste
+    sélectionnable individuellement.
+    Retourne (df_reindexe, liste_de_cles, dict_cle_vers_libelle).
+    """
+    df2 = df.reset_index(drop=True)
+    if df2.empty:
+        return df2, [], {}
+    comptes_noms = df2['nom'].astype(str).value_counts()
+    cles, labels = [], {}
+    for i, r in df2.iterrows():
+        id_r = str(r.get('id', '') or '').strip()
+        cle = id_r if id_r else f"_ligne_{i}"
+        nom_r = str(r.get('nom', ''))
+        if comptes_noms.get(nom_r, 0) > 1:
+            reference = f"#{id_r[-6:]}" if id_r else f"ligne {i + 1}"
+            labels[cle] = f"{nom_r} ({reference})"
+        else:
+            labels[cle] = nom_r
+        cles.append(cle)
+    return df2, cles, labels
+
+
 def get_identifiant(row):
     """Identifiant stable d'un produit (son id s'il existe, sinon son nom) —
     utilisé pour la wishlist et la galerie photo, PAS la position de la ligne
@@ -1270,20 +1303,28 @@ with st.sidebar:
         with tab3:
             st.subheader("✏️ Modifier un article")
             if not df_catalogue.empty:
-                noms = df_catalogue['nom'].dropna().astype(str).unique().tolist()
-                article_to_edit = st.selectbox("Article à modifier", noms, key="select_edit")
+                df_edit_ref, cles_edit, labels_edit = preparer_selection_articles(df_catalogue)
+                cle_article = st.selectbox(
+                    "Article à modifier", cles_edit,
+                    format_func=lambda c: labels_edit.get(c, c), key="select_edit"
+                )
 
-                # Récupère la ligne actuelle de l'article sélectionné
-                row_edit = df_catalogue[df_catalogue['nom'].astype(str) == article_to_edit].iloc[0]
+                # Récupère la ligne actuelle de l'article sélectionné, via sa clé
+                # unique (id catalogue, ou position de ligne à défaut) — jamais par
+                # nom seul, pour ne pas retomber systématiquement sur le premier
+                # article en cas de doublon de nom.
+                idx_edit = cles_edit.index(cle_article)
+                row_edit = df_edit_ref.iloc[idx_edit]
+                article_to_edit = str(row_edit.get('nom', ''))
 
                 # 🔧 FIX (bug réel : "seul le premier article se modifie") : sans clé
                 # unique, Streamlit associe "Nom de l'article", "Prix", etc. à un seul
                 # widget interne qui garde en mémoire les valeurs du PREMIER article
                 # ouvert dans ce formulaire — changer la sélection ne rafraîchissait
                 # donc que la photo (qui n'est pas un widget interactif), pas les
-                # champs texte/nombre. On force un widget distinct par article en
-                # suffixant chaque clé par son identifiant stable (ou son nom à défaut).
-                cle_article = str(row_edit.get('id', '') or article_to_edit)
+                # champs texte/nombre. "cle_article" (déjà unique, voir ci-dessus)
+                # sert de suffixe à chaque widget pour forcer une instance distincte
+                # par article, y compris entre deux articles de même nom.
 
                 with st.form(f"edit_form_{cle_article}"):
                     col_img1, col_img2 = st.columns([1, 2])
@@ -1397,13 +1438,15 @@ with st.sidebar:
         with tab4:
             st.subheader("🗑️ Supprimer un article")
             if not df_catalogue.empty:
-                article_suppr = st.selectbox(
-                    "Article à supprimer",
-                    df_catalogue['nom'].dropna().astype(str).unique(),
-                    key="select_delete"
+                df_suppr_ref, cles_suppr, labels_suppr = preparer_selection_articles(df_catalogue)
+                cle_suppr = st.selectbox(
+                    "Article à supprimer", cles_suppr,
+                    format_func=lambda c: labels_suppr.get(c, c), key="select_delete"
                 )
 
-                row_suppr = df_catalogue[df_catalogue['nom'].astype(str) == article_suppr].iloc[0]
+                idx_suppr = cles_suppr.index(cle_suppr)
+                row_suppr = df_suppr_ref.iloc[idx_suppr]
+                article_suppr = str(row_suppr.get('nom', ''))
                 col_prev1, col_prev2 = st.columns([1, 2])
                 with col_prev1:
                     st.image(row_suppr.get('image', ''), width=120)
@@ -1415,9 +1458,11 @@ with st.sidebar:
                 st.warning("⚠️ Cette action est irréversible.")
 
                 # Réinitialise la confirmation si l'utilisateur change d'article
-                if st.session_state.get("last_delete_target") != article_suppr:
+                # (comparaison sur la clé unique, pas sur le nom qui peut être
+                # partagé par plusieurs articles).
+                if st.session_state.get("last_delete_target") != cle_suppr:
                     st.session_state.confirm_delete = False
-                    st.session_state.last_delete_target = article_suppr
+                    st.session_state.last_delete_target = cle_suppr
 
                 if not st.session_state.confirm_delete:
                     if st.button("🗑️ Supprimer cet article", type="primary", use_container_width=True):
