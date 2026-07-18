@@ -132,6 +132,37 @@ def _synchroniser_panier_url():
     elif "panier" in st.query_params:
         del st.query_params["panier"]
 
+# ====================== 🆕 PERSISTANCE DE LA WISHLIST ======================
+# Même principe que le panier ci-dessus, mais pour les favoris (❤️).
+def _encoder_favoris(favoris):
+    try:
+        if not favoris:
+            return ""
+        payload = json.dumps(favoris, ensure_ascii=False, separators=(",", ":"))
+        return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
+    except Exception:
+        return ""
+
+def _decoder_favoris(valeur):
+    try:
+        if not valeur:
+            return []
+        payload = base64.urlsafe_b64decode(str(valeur).encode("ascii")).decode("utf-8")
+        favoris = json.loads(payload)
+        if isinstance(favoris, list):
+            return favoris
+    except Exception:
+        pass
+    return []
+
+def _synchroniser_favoris_url():
+    encode = _encoder_favoris(st.session_state.wishlist)
+    if encode:
+        if st.query_params.get("favoris") != encode:
+            st.query_params["favoris"] = encode
+    elif "favoris" in st.query_params:
+        del st.query_params["favoris"]
+
 # ====================== SESSION STATE ======================
 if 'cart' not in st.session_state:
     # 🆕 Session toute fraîche : on tente de restaurer le panier depuis l'URL
@@ -147,6 +178,8 @@ if 'admin_token' not in st.session_state:
     st.session_state.admin_token = ""
 if 'pending_cart_toast' not in st.session_state:
     st.session_state.pending_cart_toast = None
+if 'wishlist' not in st.session_state:
+    st.session_state.wishlist = _decoder_favoris(st.query_params.get("favoris", ""))
 
 # 🔧 FIX : affiche le toast "ajouté au panier" mémorisé au tour précédent.
 # On ne l'affiche plus directement au moment de l'ajout car la mise à jour
@@ -172,6 +205,12 @@ def get_unique_values(df, col):
     if df.empty or col not in df.columns:
         return ["Toutes"]
     return ["Toutes"] + sorted(df[col].dropna().astype(str).unique())
+
+def get_identifiant(row):
+    """Identifiant stable d'un produit (son id s'il existe, sinon son nom) —
+    utilisé pour la wishlist et la galerie photo, PAS la position de la ligne
+    dans le tableau qui change à chaque tri/filtre."""
+    return str(row.get('id', '') or '').strip() or str(row.get('nom', ''))
 
 def parse_variants(valeur):
     """Découpe une chaîne 'S, M, L' ou 'Rouge / Bleu' en liste de valeurs propres, sans doublons."""
@@ -319,6 +358,11 @@ with col4:
 with col5:
     sort_option = st.selectbox("Trier par", ["Pertinence", "Prix croissant", "Prix décroissant"])
 
+favoris_uniquement = st.checkbox(
+    f"❤️ Afficher uniquement mes favoris ({len(st.session_state.wishlist)})",
+    key="filtre_favoris"
+) if st.session_state.wishlist else False
+
 # ====================== FILTRAGE ======================
 df_f = df_catalogue.copy()
 if not df_f.empty:
@@ -330,6 +374,9 @@ if not df_f.empty:
         df_f = df_f[df_f['tailles'].astype(str).str.contains(taille_filter, case=False, na=False)]
 
     df_f = df_f[(df_f['prix_numeric'] >= min_price) & (df_f['prix_numeric'] <= max_price)]
+
+    if favoris_uniquement:
+        df_f = df_f[df_f.apply(lambda r: get_identifiant(r) in st.session_state.wishlist, axis=1)]
 
     if sort_option == "Prix croissant":
         df_f = df_f.sort_values('prix_numeric')
@@ -347,7 +394,7 @@ if 'catalog_page' not in st.session_state:
     st.session_state.catalog_page = 1
 
 # Si les filtres changent, on revient à la page 1 pour éviter une page vide
-filtres_signature = (search, cat_filter, taille_filter, sort_option, min_price, max_price)
+filtres_signature = (search, cat_filter, taille_filter, sort_option, min_price, max_price, favoris_uniquement)
 if st.session_state.get('catalog_filters_signature') != filtres_signature:
     st.session_state.catalog_filters_signature = filtres_signature
     st.session_state.catalog_page = 1
@@ -380,142 +427,15 @@ def afficher_controles_pagination(position):
             st.session_state.catalog_page += 1
             st.rerun()
 
-# ====================== AFFICHAGE PRODUITS ======================
-if not df_f.empty:
-    afficher_controles_pagination("haut")
-    st.markdown("")
-    cols = st.columns(3)
-    for pos, (idx, row) in enumerate(df_page.iterrows()):
-        with cols[pos % 3]:
-            prix = int(row['prix_numeric'])
-            stock = int(row['stock'])
-            en_rupture = stock <= 0
-
-            # 🔧 FIX STABILITÉ GALERIE : identifiant stable du produit (l'id de
-            # la fiche s'il existe, sinon son nom) — PAS la position de la ligne
-            # dans le tableau, qui change à chaque tri/filtre/ajout/suppression
-            # d'article et faisait dériver la photo affichée vers le mauvais
-            # article après coup.
-            identifiant_produit = str(row.get('id', '') or '').strip() or str(row.get('nom', ''))
-
-            # Galerie : photo principale + photos supplémentaires (colonne "images_supplementaires")
-            galerie = [g for g in (
-                [str(row.get('image', '') or '')] + parse_image_list(row.get('images_supplementaires', ''))
-            ) if g]
-            if not galerie:
-                galerie = ['']
-            cle_galerie = f"galerie_{identifiant_produit}"
-            if cle_galerie not in st.session_state:
-                st.session_state[cle_galerie] = 0
-            st.session_state[cle_galerie] = st.session_state[cle_galerie] % len(galerie)
-            image_affichee = galerie[st.session_state[cle_galerie]]
-
-            st.markdown(f"""
-                <div class="product-card">
-                    <a href="{image_affichee}" target="_blank">
-                        <img src="{image_affichee}" style="width:100%; border-radius:12px; aspect-ratio:1/1; object-fit:cover;"
-                             onerror="this.src='https://placehold.co/300x300?text=Image+non+disponible';">
-                    </a>
-                    <h3>{row['nom']}</h3>
-                    <div class="price">{format_fcfa(prix)}</div>
-                    <div class="{'stock-low' if stock < 5 else 'stock'}">Stock : {stock} pièce(s)</div>
-                </div>
-            """, unsafe_allow_html=True)
-
-            if len(galerie) > 1:
-                nav1, nav2, nav3 = st.columns([1, 2, 1])
-                with nav1:
-                    if st.button("◀", key=f"prev_img_{idx}_{row.get('nom')}", use_container_width=True):
-                        st.session_state[cle_galerie] = (st.session_state[cle_galerie] - 1) % len(galerie)
-                        st.rerun()
-                with nav2:
-                    st.markdown(
-                        f"<div style='text-align:center; padding-top:6px;'>Photo {st.session_state[cle_galerie]+1}/{len(galerie)}</div>",
-                        unsafe_allow_html=True
-                    )
-                with nav3:
-                    if st.button("▶", key=f"next_img_{idx}_{row.get('nom')}", use_container_width=True):
-                        st.session_state[cle_galerie] = (st.session_state[cle_galerie] + 1) % len(galerie)
-                        st.rerun()
-
-            options_taille = parse_variants(row.get('tailles', ''))
-            options_couleur = parse_variants(row.get('couleurs', ''))
-
-            taille_choisie = ""
-            couleur_choisie = ""
-            if options_taille:
-                if len(options_taille) == 1:
-                    taille_choisie = options_taille[0]
-                else:
-                    taille_choisie = st.selectbox(
-                        "Taille", options_taille, key=f"taille_{idx}_{row.get('nom')}"
-                    )
-            if options_couleur:
-                if len(options_couleur) == 1:
-                    couleur_choisie = options_couleur[0]
-                else:
-                    couleur_choisie = st.selectbox(
-                        "Couleur", options_couleur, key=f"couleur_{idx}_{row.get('nom')}"
-                    )
-
-            if st.button("🛒 Ajouter au panier" if not en_rupture else "❌ Rupture de stock",
-                        key=f"add_{idx}_{row.get('nom')}", disabled=en_rupture):
-                existing = next((item for item in st.session_state.cart
-                                  if item['nom'] == row['nom']
-                                  and item.get('taille', '') == taille_choisie
-                                  and item.get('couleur', '') == couleur_choisie), None)
-                if existing:
-                    existing['quantite'] += 1
-                else:
-                    st.session_state.cart.append({
-                        "id": str(uuid.uuid4()),
-                        "nom": row['nom'],
-                        "prix": prix,
-                        "image": row.get('image', ''),
-                        "taille": taille_choisie,
-                        "couleur": couleur_choisie,
-                        "quantite": 1
-                    })
-                variante = " / ".join(v for v in [taille_choisie, couleur_choisie] if v)
-                label_toast = f"{row['nom']} ({variante})" if variante else row['nom']
-                st.session_state.pending_cart_toast = f"✅ {label_toast} ajouté au panier !"
-                _synchroniser_panier_url()
-                st.rerun()
-
-            # ====================== 🆕 ALERTE RETOUR EN STOCK ======================
-            if en_rupture:
-                with st.expander("🔔 Me prévenir quand disponible"):
-                    type_contact = st.radio(
-                        "Comment veux-tu être prévenu(e) ?", ["Email", "Téléphone (WhatsApp)"],
-                        key=f"type_alerte_{idx}_{row.get('nom')}", horizontal=True
-                    )
-                    contact_saisi = st.text_input(
-                        "Email" if type_contact == "Email" else "Numéro de téléphone",
-                        key=f"contact_alerte_{idx}_{row.get('nom')}",
-                        placeholder="ex: nom@email.com" if type_contact == "Email" else "ex: 66 12 34 56"
-                    )
-                    if st.button("🔔 M'alerter", key=f"btn_alerte_{idx}_{row.get('nom')}"):
-                        if not contact_saisi.strip():
-                            st.warning("Merci de renseigner un contact.")
-                        else:
-                            reponse_alerte, err_alerte = call_passerelle({
-                                "action": "inscrire_alerte_stock",
-                                "nom_article": row['nom'],
-                                "contact_type": "email" if type_contact == "Email" else "telephone",
-                                "contact": contact_saisi.strip()
-                            })
-                            if err_alerte or not reponse_alerte or reponse_alerte.get("status") != "success":
-                                st.error(f"❌ {(reponse_alerte or {}).get('message', err_alerte or 'Erreur')}")
-                            else:
-                                st.success(f"✅ {reponse_alerte.get('message', 'Inscription enregistrée')}")
-    st.markdown("---")
-    afficher_controles_pagination("bas")
-else:
-    st.info("Aucun article ne correspond à vos critères.")
-
-# ====================== PANIER ======================
-with st.sidebar:
-    header_placeholder = st.empty()
+# ====================== 🆕 PANIER (relocalisé de la barre latérale) ======================
+# 🔧 FIX MOBILE : le panier ne vivait qu'en barre latérale, repliée par
+# défaut sur mobile derrière une petite flèche peu visible — beaucoup de
+# clients ne la trouvaient jamais. Il est maintenant ici, directement dans
+# le contenu principal, juste au-dessus des produits, et s'ouvre tout seul
+# dès qu'il contient un article.
+nb_articles_label = sum(item['quantite'] for item in st.session_state.cart)
+titre_panier = f"🛒 Mon Panier ({nb_articles_label})" if nb_articles_label else "🛒 Mon Panier (vide)"
+with st.expander(titre_panier, expanded=bool(st.session_state.cart)):
     total_placeholder = st.empty()
     if st.session_state.cart:
         for item in st.session_state.cart[:]:
@@ -542,7 +462,6 @@ with st.sidebar:
         # (le widget number_input redéclenche l'exécution tout seul) — on
         # resynchronise donc l'URL ici, à chaque exécution du script.
         _synchroniser_panier_url()
-        header_placeholder.header(f"🛍️ Mon Panier ({nb_articles})")
         total_placeholder.success(f"**Total : {format_fcfa(total)}**")
 
         st.markdown("---")
@@ -621,9 +540,175 @@ with st.sidebar:
                         unsafe_allow_html=True
                     )
     else:
-        header_placeholder.header("🛍️ Mon Panier")
         st.info("Votre panier est vide.")
 
+# ====================== AFFICHAGE PRODUITS ======================
+if not df_f.empty:
+    afficher_controles_pagination("haut")
+    st.markdown("")
+    cols = st.columns(3)
+    for pos, (idx, row) in enumerate(df_page.iterrows()):
+        with cols[pos % 3]:
+            prix = int(row['prix_numeric'])
+            stock = int(row['stock'])
+            en_rupture = stock <= 0
+
+            # 🔧 FIX STABILITÉ GALERIE : identifiant stable du produit (l'id de
+            # la fiche s'il existe, sinon son nom) — PAS la position de la ligne
+            # dans le tableau, qui change à chaque tri/filtre/ajout/suppression
+            # d'article et faisait dériver la photo affichée vers le mauvais
+            # article après coup.
+            identifiant_produit = get_identifiant(row)
+
+            # Galerie : photo principale + photos supplémentaires (colonne "images_supplementaires")
+            galerie = [g for g in (
+                [str(row.get('image', '') or '')] + parse_image_list(row.get('images_supplementaires', ''))
+            ) if g]
+            if not galerie:
+                galerie = ['']
+            cle_galerie = f"galerie_{identifiant_produit}"
+            if cle_galerie not in st.session_state:
+                st.session_state[cle_galerie] = 0
+            st.session_state[cle_galerie] = st.session_state[cle_galerie] % len(galerie)
+            image_affichee = galerie[st.session_state[cle_galerie]]
+
+            st.markdown(f"""
+                <div class="product-card">
+                    <a href="{image_affichee}" target="_blank">
+                        <img src="{image_affichee}" style="width:100%; border-radius:12px; aspect-ratio:1/1; object-fit:cover;"
+                             onerror="this.src='https://placehold.co/300x300?text=Image+non+disponible';">
+                    </a>
+                    <h3>{row['nom']}</h3>
+                    <div class="price">{format_fcfa(prix)}</div>
+                    <div class="{'stock-low' if stock < 5 else 'stock'}">Stock : {stock} pièce(s)</div>
+                </div>
+            """, unsafe_allow_html=True)
+
+            if len(galerie) > 1:
+                nav1, nav2, nav3 = st.columns([1, 2, 1])
+                with nav1:
+                    if st.button("◀", key=f"prev_img_{idx}_{row.get('nom')}", use_container_width=True):
+                        st.session_state[cle_galerie] = (st.session_state[cle_galerie] - 1) % len(galerie)
+                        st.rerun()
+                with nav2:
+                    st.markdown(
+                        f"<div style='text-align:center; padding-top:6px;'>Photo {st.session_state[cle_galerie]+1}/{len(galerie)}</div>",
+                        unsafe_allow_html=True
+                    )
+                with nav3:
+                    if st.button("▶", key=f"next_img_{idx}_{row.get('nom')}", use_container_width=True):
+                        st.session_state[cle_galerie] = (st.session_state[cle_galerie] + 1) % len(galerie)
+                        st.rerun()
+
+            # 🆕 WISHLIST + PARTAGE
+            est_favori = identifiant_produit in st.session_state.wishlist
+            colf, colp = st.columns(2)
+            with colf:
+                if st.button("❤️ Favori" if est_favori else "🤍 Favori",
+                             key=f"fav_{idx}_{row.get('nom')}", use_container_width=True):
+                    if est_favori:
+                        st.session_state.wishlist = [f for f in st.session_state.wishlist if f != identifiant_produit]
+                    else:
+                        st.session_state.wishlist = st.session_state.wishlist + [identifiant_produit]
+                    _synchroniser_favoris_url()
+                    st.rerun()
+            with colp:
+                texte_partage = f"🛍️ Regarde cet article : {row['nom']} — {format_fcfa(prix)} chez {NOM_BOUTIQUE} !"
+                lien_partage = f"https://wa.me/?text={urllib.parse.quote(texte_partage)}"
+                st.link_button("📤 Partager", lien_partage, use_container_width=True)
+
+            # 🆕 VUE RAPIDE : toutes les photos + le détail complet sans quitter la grille.
+            with st.expander("👁️ Vue rapide"):
+                if len(galerie) > 1:
+                    st.caption(f"{len(galerie)} photo(s)")
+                    miniatures = st.columns(min(len(galerie), 4))
+                    for i_photo, url_photo in enumerate(galerie[:4]):
+                        with miniatures[i_photo]:
+                            st.image(url_photo, use_container_width=True)
+                st.markdown(f"**{row['nom']}**")
+                st.write(format_fcfa(prix))
+                st.caption(f"Stock : {stock} pièce(s)" if stock > 0 else "Rupture de stock")
+                if options_taille := parse_variants(row.get('tailles', '')):
+                    st.caption(f"Tailles disponibles : {', '.join(options_taille)}")
+                if options_couleur := parse_variants(row.get('couleurs', '')):
+                    st.caption(f"Couleurs disponibles : {', '.join(options_couleur)}")
+
+            options_taille = parse_variants(row.get('tailles', ''))
+            options_couleur = parse_variants(row.get('couleurs', ''))
+
+            taille_choisie = ""
+            couleur_choisie = ""
+            if options_taille:
+                if len(options_taille) == 1:
+                    taille_choisie = options_taille[0]
+                else:
+                    taille_choisie = st.selectbox(
+                        "Taille", options_taille, key=f"taille_{idx}_{row.get('nom')}"
+                    )
+            if options_couleur:
+                if len(options_couleur) == 1:
+                    couleur_choisie = options_couleur[0]
+                else:
+                    couleur_choisie = st.selectbox(
+                        "Couleur", options_couleur, key=f"couleur_{idx}_{row.get('nom')}"
+                    )
+
+            if st.button("🛒 Ajouter au panier" if not en_rupture else "❌ Rupture de stock",
+                        key=f"add_{idx}_{row.get('nom')}", disabled=en_rupture):
+                existing = next((item for item in st.session_state.cart
+                                  if item['nom'] == row['nom']
+                                  and item.get('taille', '') == taille_choisie
+                                  and item.get('couleur', '') == couleur_choisie), None)
+                if existing:
+                    existing['quantite'] += 1
+                else:
+                    st.session_state.cart.append({
+                        "id": str(uuid.uuid4()),
+                        "nom": row['nom'],
+                        "prix": prix,
+                        "image": row.get('image', ''),
+                        "taille": taille_choisie,
+                        "couleur": couleur_choisie,
+                        "quantite": 1
+                    })
+                variante = " / ".join(v for v in [taille_choisie, couleur_choisie] if v)
+                label_toast = f"{row['nom']} ({variante})" if variante else row['nom']
+                st.session_state.pending_cart_toast = f"✅ {label_toast} ajouté au panier !"
+                _synchroniser_panier_url()
+                st.rerun()
+
+            # ====================== 🆕 ALERTE RETOUR EN STOCK ======================
+            if en_rupture:
+                with st.expander("🔔 Me prévenir quand disponible"):
+                    type_contact = st.radio(
+                        "Comment veux-tu être prévenu(e) ?", ["Email", "Téléphone (WhatsApp)"],
+                        key=f"type_alerte_{idx}_{row.get('nom')}", horizontal=True
+                    )
+                    contact_saisi = st.text_input(
+                        "Email" if type_contact == "Email" else "Numéro de téléphone",
+                        key=f"contact_alerte_{idx}_{row.get('nom')}",
+                        placeholder="ex: nom@email.com" if type_contact == "Email" else "ex: 66 12 34 56"
+                    )
+                    if st.button("🔔 M'alerter", key=f"btn_alerte_{idx}_{row.get('nom')}"):
+                        if not contact_saisi.strip():
+                            st.warning("Merci de renseigner un contact.")
+                        else:
+                            reponse_alerte, err_alerte = call_passerelle({
+                                "action": "inscrire_alerte_stock",
+                                "nom_article": row['nom'],
+                                "contact_type": "email" if type_contact == "Email" else "telephone",
+                                "contact": contact_saisi.strip()
+                            })
+                            if err_alerte or not reponse_alerte or reponse_alerte.get("status") != "success":
+                                st.error(f"❌ {(reponse_alerte or {}).get('message', err_alerte or 'Erreur')}")
+                            else:
+                                st.success(f"✅ {reponse_alerte.get('message', 'Inscription enregistrée')}")
+    st.markdown("---")
+    afficher_controles_pagination("bas")
+else:
+    st.info("Aucun article ne correspond à vos critères.")
+
+with st.sidebar:
     # ====================== SUIVI DE COMMANDE (visible à tous les clients) ======================
     st.markdown("---")
     with st.expander("📦 Suivre ma commande"):
