@@ -74,6 +74,8 @@ st.markdown("""
     .product-card h3 {color: #1a1a1a; margin: 12px 0 6px 0;}
     .product-card:hover {transform: translateY(-8px); box-shadow: 0 20px 40px rgba(0,0,0,0.1);}
     .price {color: #b58328; font-weight: 700; font-size: 1.4rem;}
+    .price-barre {color: #999; font-size: 0.95rem; text-decoration: line-through; margin-right: 8px;}
+    .badge-promo {display: inline-block; background: #dc3545; color: white; font-weight: 700; font-size: 0.75rem; padding: 2px 8px; border-radius: 6px; margin-bottom: 4px;}
     .stock {font-size: 0.9rem; color: #28a745; font-weight: 500;}
     .stock-low {color: #dc3545; font-weight: 500;}
     </style>
@@ -287,14 +289,16 @@ def call_passerelle_admin(payload, timeout=20):
 def load_config(refresh_token=0):
     reponse, err = call_passerelle({"action": "get_config"})
     if err or not reponse or reponse.get("status") != "success":
-        return {"nom_boutique": "Collection Luxe N'Djamena", "whatsapp": "", "logo": "", "email_admin": "", "seuil_alerte_stock": "3", "heure_bilan_quotidien": "20"}
+        return {"nom_boutique": "Collection Luxe N'Djamena", "whatsapp": "", "logo": "", "email_admin": "", "seuil_alerte_stock": "3", "heure_bilan_quotidien": "20", "panier_abandonne_actif": "non", "delai_relance_panier_minutes": "60"}
     return {
         "nom_boutique": reponse.get("nom_boutique") or "Collection Luxe N'Djamena",
         "whatsapp": reponse.get("whatsapp") or "",
         "logo": reponse.get("logo") or "",
         "email_admin": reponse.get("email_admin") or "",
         "seuil_alerte_stock": reponse.get("seuil_alerte_stock") or "3",
-        "heure_bilan_quotidien": reponse.get("heure_bilan_quotidien") or "20"
+        "heure_bilan_quotidien": reponse.get("heure_bilan_quotidien") or "20",
+        "panier_abandonne_actif": reponse.get("panier_abandonne_actif") or "non",
+        "delai_relance_panier_minutes": reponse.get("delai_relance_panier_minutes") or "60"
     }
 
 config = load_config(st.session_state.get("refresh_token", 0))
@@ -347,8 +351,27 @@ def uniformiser_colonne_images_supp(df):
             return df.rename(columns={c: 'images_supplementaires'})
     return df
 
+# 🆕 PRIX PROMOTIONNELS : calcule un prix "effectif" par article (le prix promo
+# s'il est renseigné et inférieur au prix normal, sinon le prix normal). Toute
+# la boutique (filtre, tri, panier, partage) utilise ensuite ce prix effectif —
+# le prix normal reste affiché barré à titre indicatif quand une promo est active.
+def calculer_prix_effectif(df):
+    if df.empty:
+        df['prix_promo_numeric'] = pd.Series(dtype=float)
+        df['en_promo'] = pd.Series(dtype=bool)
+        df['prix_effectif_numeric'] = pd.Series(dtype=float)
+        return df
+    if 'prix_promo' in df.columns:
+        df['prix_promo_numeric'] = pd.to_numeric(df['prix_promo'], errors='coerce')
+    else:
+        df['prix_promo_numeric'] = float('nan')
+    df['en_promo'] = df['prix_promo_numeric'].notna() & (df['prix_promo_numeric'] > 0) & (df['prix_promo_numeric'] < df['prix_numeric'])
+    df['prix_effectif_numeric'] = df['prix_numeric'].where(~df['en_promo'], df['prix_promo_numeric'])
+    return df
+
 df_catalogue = load_data(ID_SHEET, st.session_state.refresh_token)
 df_catalogue = uniformiser_colonne_images_supp(df_catalogue)
+df_catalogue = calculer_prix_effectif(df_catalogue)
 
 # ====================== FILTRES ======================
 st.subheader("Notre Collection")
@@ -384,15 +407,15 @@ if not df_f.empty:
     if taille_filter != "Toutes" and 'tailles' in df_f.columns:
         df_f = df_f[df_f['tailles'].astype(str).str.contains(taille_filter, case=False, na=False)]
 
-    df_f = df_f[(df_f['prix_numeric'] >= min_price) & (df_f['prix_numeric'] <= max_price)]
+    df_f = df_f[(df_f['prix_effectif_numeric'] >= min_price) & (df_f['prix_effectif_numeric'] <= max_price)]
 
     if favoris_uniquement:
         df_f = df_f[df_f.apply(lambda r: get_identifiant(r) in st.session_state.wishlist, axis=1)]
 
     if sort_option == "Prix croissant":
-        df_f = df_f.sort_values('prix_numeric')
+        df_f = df_f.sort_values('prix_effectif_numeric')
     elif sort_option == "Prix décroissant":
-        df_f = df_f.sort_values('prix_numeric', ascending=False)
+        df_f = df_f.sort_values('prix_effectif_numeric', ascending=False)
 
 st.caption(f"**{len(df_f)} article(s)** trouvé(s)")
 
@@ -502,6 +525,28 @@ with st.expander(titre_panier, expanded=bool(st.session_state.cart)):
         if not coordonnees_completes:
             st.caption("⚠️ Merci de renseigner votre nom et votre téléphone avant d'envoyer la commande.")
 
+        # 🆕 PANIER ABANDONNÉ : dès que le client a rempli ses coordonnées, on
+        # enregistre discrètement un "checkpoint" côté serveur (sans bloquer
+        # l'affichage, sans toast) — seulement si quelque chose a changé depuis
+        # le dernier enregistrement, pour ne pas spammer l'API à chaque rerun.
+        if coordonnees_completes:
+            signature_panier_abandonne = (
+                client_nom_saisi.strip(), re.sub(r"\D", "", client_telephone_saisi),
+                tuple((i['id'], i['quantite']) for i in st.session_state.cart), total
+            )
+            if st.session_state.get("derniere_signature_panier_abandonne") != signature_panier_abandonne:
+                try:
+                    call_passerelle({
+                        "action": "enregistrer_panier_abandonne",
+                        "client_nom": client_nom_saisi.strip(),
+                        "client_telephone": re.sub(r"\D", "", client_telephone_saisi),
+                        "articles": st.session_state.cart,
+                        "total": total
+                    }, timeout=8)
+                except Exception:
+                    pass
+                st.session_state.derniere_signature_panier_abandonne = signature_panier_abandonne
+
         if st.button("✅ Envoyer ma commande", type="primary", use_container_width=True,
                      disabled=not coordonnees_completes):
             with st.spinner("Enregistrement..."):
@@ -539,6 +584,7 @@ with st.expander(titre_panier, expanded=bool(st.session_state.cart)):
                         )
                     load_data.clear()  # le stock a été décrémenté côté serveur
                     st.session_state.cart = []
+                    st.session_state.derniere_signature_panier_abandonne = None
                     _synchroniser_panier_url()
                     st.session_state.refresh_token += 1
                     st.markdown(
@@ -560,7 +606,9 @@ if not df_f.empty:
     cols = st.columns(3)
     for pos, (idx, row) in enumerate(df_page.iterrows()):
         with cols[pos % 3]:
-            prix = int(row['prix_numeric'])
+            prix_original = int(row['prix_numeric'])
+            en_promo = bool(row.get('en_promo', False))
+            prix = int(row['prix_effectif_numeric']) if en_promo else prix_original
             stock = int(row['stock'])
             en_rupture = stock <= 0
 
@@ -583,6 +631,14 @@ if not df_f.empty:
             st.session_state[cle_galerie] = st.session_state[cle_galerie] % len(galerie)
             image_affichee = galerie[st.session_state[cle_galerie]]
 
+            reduction_pct = round((1 - prix / prix_original) * 100) if en_promo and prix_original > 0 else 0
+            bloc_prix = (
+                f'<div class="badge-promo">PROMO -{reduction_pct}%</div><br>'
+                f'<span class="price-barre">{format_fcfa(prix_original)}</span>'
+                f'<span class="price">{format_fcfa(prix)}</span>'
+                if en_promo else
+                f'<div class="price">{format_fcfa(prix)}</div>'
+            )
             st.markdown(f"""
                 <div class="product-card">
                     <a href="{image_affichee}" target="_blank">
@@ -590,7 +646,7 @@ if not df_f.empty:
                              onerror="this.src='https://placehold.co/300x300?text=Image+non+disponible';">
                     </a>
                     <h3>{row['nom']}</h3>
-                    <div class="price">{format_fcfa(prix)}</div>
+                    {bloc_prix}
                     <div class="{'stock-low' if stock < 5 else 'stock'}">Stock : {stock} pièce(s)</div>
                 </div>
             """, unsafe_allow_html=True)
@@ -637,7 +693,10 @@ if not df_f.empty:
                         with miniatures[i_photo]:
                             st.image(url_photo, use_container_width=True)
                 st.markdown(f"**{row['nom']}**")
-                st.write(format_fcfa(prix))
+                if en_promo:
+                    st.write(f"~~{format_fcfa(prix_original)}~~ → **{format_fcfa(prix)}** (-{reduction_pct}%)")
+                else:
+                    st.write(format_fcfa(prix))
                 st.caption(f"Stock : {stock} pièce(s)" if stock > 0 else "Rupture de stock")
                 if options_taille := parse_variants(row.get('tailles', '')):
                     st.caption(f"Tailles disponibles : {', '.join(options_taille)}")
@@ -813,6 +872,37 @@ with st.sidebar:
             else:
                 series = dash_data.get("series", [])
                 top_articles = dash_data.get("top_articles", [])
+                par_categorie = dash_data.get("par_categorie", [])
+                top_clients = dash_data.get("top_clients", [])
+                panier_moyen = dash_data.get("panier_moyen", 0)
+                taux_annulation = dash_data.get("taux_annulation", 0)
+                comparaison = dash_data.get("comparaison", {})
+
+                # 🆕 STATS AVANCÉES : panier moyen, taux d'annulation, évolution vs période précédente
+                def _fleche_evolution(pct):
+                    if pct > 0:
+                        return f"▲ +{pct:.0f}%"
+                    if pct < 0:
+                        return f"▼ {pct:.0f}%"
+                    return "▬ 0%"
+
+                col_a1, col_a2, col_a3, col_a4 = st.columns(4)
+                with col_a1:
+                    st.metric("🧺 Panier moyen", format_fcfa(panier_moyen))
+                with col_a2:
+                    st.metric("❌ Taux d'annulation", f"{taux_annulation:.1f}%")
+                with col_a3:
+                    st.metric(
+                        "💰 Évolution CA",
+                        _fleche_evolution(comparaison.get("evolution_ca_pct", 0)),
+                        help="Comparé à la période précédente de même durée"
+                    )
+                with col_a4:
+                    st.metric(
+                        "🧾 Évolution commandes",
+                        _fleche_evolution(comparaison.get("evolution_commandes_pct", 0)),
+                        help="Comparé à la période précédente de même durée"
+                    )
 
                 if series:
                     df_series = pd.DataFrame(series).set_index("date")
@@ -837,6 +927,39 @@ with st.sidebar:
                     st.bar_chart(df_top.set_index("nom")["quantite"])
                 else:
                     st.info("Aucune vente enregistrée sur cette période.")
+
+                # 🆕 Ventes par catégorie sur la période
+                st.markdown("**📦 Ventes par catégorie (période sélectionnée)**")
+                if par_categorie:
+                    df_cat = pd.DataFrame(par_categorie)
+                    df_cat_affiche = df_cat.rename(columns={
+                        "categorie": "Catégorie", "quantite": "Quantité vendue", "ca": "CA généré"
+                    })
+                    col_cat_tbl, col_cat_chart = st.columns([1.2, 1])
+                    with col_cat_tbl:
+                        df_cat_affiche_fmt = df_cat_affiche.copy()
+                        df_cat_affiche_fmt["CA généré"] = df_cat_affiche_fmt["CA généré"].apply(format_fcfa)
+                        st.dataframe(df_cat_affiche_fmt, use_container_width=True, hide_index=True)
+                    with col_cat_chart:
+                        st.bar_chart(df_cat.set_index("categorie")["ca"])
+                else:
+                    st.info("Aucune vente par catégorie sur cette période.")
+
+                # 🆕 Fidélité client : meilleurs clients sur tout l'historique
+                st.markdown("**🥇 Meilleurs clients (tout l'historique)**")
+                if top_clients:
+                    df_clients = pd.DataFrame(top_clients)
+                    colonnes_clients = ["client", "nb_commandes", "total_depense"]
+                    if "telephone" in df_clients.columns:
+                        colonnes_clients.insert(1, "telephone")
+                    df_clients_affiche = df_clients[colonnes_clients].rename(columns={
+                        "client": "Client", "telephone": "Téléphone",
+                        "nb_commandes": "Nb commandes", "total_depense": "Total dépensé"
+                    })
+                    df_clients_affiche["Total dépensé"] = df_clients_affiche["Total dépensé"].apply(format_fcfa)
+                    st.dataframe(df_clients_affiche, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Aucun client fidèle pour le moment.")
 
             st.markdown("---")
             st.subheader("📋 Dernières Commandes")
@@ -968,12 +1091,59 @@ with st.sidebar:
                 else:
                     st.success("✅ Aucun stock critique")
 
+            # ====================== 🆕 PANIERS ABANDONNÉS ======================
+            st.markdown("---")
+            st.subheader("🛒 Paniers abandonnés")
+            if str(config.get("panier_abandonne_actif", "non")) != "oui":
+                st.info(
+                    "La relance des paniers abandonnés est désactivée. "
+                    "Active-la dans l'onglet ⚙️ Paramètres pour commencer à suivre les clients "
+                    "qui remplissent leurs coordonnées sans finaliser leur commande."
+                )
+            else:
+                paniers_data, err_paniers = call_passerelle_admin({"action": "get_paniers_abandonnes"})
+                if err_paniers or not paniers_data or paniers_data.get("status") != "success":
+                    st.warning("Impossible de charger les paniers abandonnés pour le moment.")
+                else:
+                    paniers_liste = paniers_data.get("paniers", [])
+                    if not paniers_liste:
+                        st.success("✅ Aucun panier abandonné en attente pour le moment.")
+                    else:
+                        st.caption(f"{len(paniers_liste)} panier(s) en attente de finalisation ou déjà relancé(s).")
+                        for panier in paniers_liste:
+                            articles_panier = panier.get("articles", [])
+                            resume_articles = ", ".join(
+                                f"{a.get('nom', '')} × {a.get('quantite', 1)}" for a in articles_panier
+                            )
+                            statut_panier = panier.get("statut", "en_attente")
+                            badge_statut = "🔔 Relance envoyée" if statut_panier == "relance_envoyee" else "⏳ En attente"
+                            with st.container():
+                                st.markdown(
+                                    f"**{panier.get('client', 'Client')}** — {format_fcfa(panier.get('total', 0))} · {badge_statut}"
+                                )
+                                st.caption(resume_articles or "Détail des articles indisponible")
+                                telephone_panier = re.sub(r"\D", "", str(panier.get("telephone", "") or ""))
+                                if telephone_panier:
+                                    message_relance_manuelle = (
+                                        f"Bonjour {panier.get('client', '')}, vous avez laissé des articles dans "
+                                        f"votre panier chez {NOM_BOUTIQUE}. Souhaitez-vous toujours les commander ? 😊"
+                                    )
+                                    wa_relance_url = f"https://wa.me/{telephone_panier}?text={urllib.parse.quote(message_relance_manuelle)}"
+                                    st.link_button("📲 Relancer sur WhatsApp", wa_relance_url)
+                                else:
+                                    st.caption("⚠️ Pas de téléphone enregistré pour ce panier.")
+                                st.markdown("---")
+
         # ====================== AJOUTER ======================
         with tab2:
             st.subheader("➕ Ajouter un article")
             with st.form("add_form", clear_on_submit=True):
                 nom = st.text_input("Nom de l'article *")
                 prix = st.number_input("Prix (FCFA)", min_value=0, step=1000)
+                prix_promo = st.number_input(
+                    "Prix promotionnel (FCFA, optionnel)", min_value=0, step=1000, value=0,
+                    help="Laisser à 0 pour ne pas activer de promo. Doit être inférieur au prix normal."
+                )
                 uploaded = st.file_uploader("Photo principale *", type=["jpg", "png", "jpeg"])
                 photos_supp = st.file_uploader(
                     "Photos supplémentaires (optionnel)", type=["jpg", "png", "jpeg"],
@@ -987,6 +1157,8 @@ with st.sidebar:
                 if st.form_submit_button("Ajouter au catalogue"):
                     if not nom or not uploaded:
                         st.warning("Nom et photo principale sont obligatoires.")
+                    elif prix_promo and prix_promo >= prix:
+                        st.warning("Le prix promotionnel doit être inférieur au prix normal.")
                     else:
                         with st.spinner("Upload + enregistrement..."):
                             img_url, err = upload_image_to_imgbb(uploaded.getvalue())
@@ -1006,7 +1178,8 @@ with st.sidebar:
                                     "nom": nom, "prix": prix, "image": img_url,
                                     "images_supplementaires": ", ".join(urls_supp),
                                     "tailles": tailles, "couleurs": couleurs,
-                                    "categorie": categorie, "stock": stock
+                                    "categorie": categorie, "stock": stock,
+                                    "prix_promo": prix_promo or ""
                                 }
                                 reponse, err = call_passerelle_admin(payload)
                                 if err or not reponse or reponse.get("status") != "success":
@@ -1058,6 +1231,16 @@ with st.sidebar:
                         "Prix (FCFA)", min_value=0, step=1000,
                         value=int(row_edit.get('prix_numeric', 0))
                     )
+                    valeur_promo_actuelle = row_edit.get('prix_promo_numeric', None)
+                    try:
+                        valeur_promo_actuelle = int(valeur_promo_actuelle) if pd.notna(valeur_promo_actuelle) else 0
+                    except (ValueError, TypeError):
+                        valeur_promo_actuelle = 0
+                    nouveau_prix_promo = st.number_input(
+                        "Prix promotionnel (FCFA, optionnel)", min_value=0, step=1000,
+                        value=valeur_promo_actuelle,
+                        help="Laisser à 0 pour désactiver la promo. Doit être inférieur au prix normal."
+                    )
                     nouvelles_tailles = st.text_input(
                         "Tailles", value=str(row_edit.get('tailles', '') or '')
                     )
@@ -1072,6 +1255,9 @@ with st.sidebar:
                     )
 
                     if st.form_submit_button("💾 Enregistrer les modifications"):
+                        if nouveau_prix_promo and nouveau_prix_promo >= nouveau_prix:
+                            st.warning("Le prix promotionnel doit être inférieur au prix normal.")
+                            st.stop()
                         with st.spinner("Mise à jour en cours..."):
                             image_url = row_edit.get('image', '')
                             if nouvelle_photo is not None:
@@ -1103,7 +1289,8 @@ with st.sidebar:
                                 "tailles": nouvelles_tailles,
                                 "couleurs": nouvelles_couleurs,
                                 "categorie": nouvelle_categorie,
-                                "stock": nouveau_stock
+                                "stock": nouveau_stock,
+                                "prix_promo": nouveau_prix_promo or ""
                             }
                             reponse, err = call_passerelle_admin(payload)
                             if err or not reponse or reponse.get("status") != "success":
@@ -1309,6 +1496,41 @@ with st.sidebar:
                         st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
                     else:
                         st.toast(f"✅ Bilan quotidien réglé sur {nouvelle_heure}h !")
+                        load_config.clear()
+                        st.rerun()
+
+            st.markdown("---")
+            with st.form("form_panier_abandonne"):
+                st.markdown("**🛒 Récupération de panier abandonné**")
+                st.caption(
+                    "Dès qu'un client renseigne son nom et son téléphone dans le panier sans "
+                    "finaliser sa commande, il est suivi ici. Passé le délai ci-dessous sans "
+                    "commande confirmée, tu reçois un email avec un lien WhatsApp prérempli "
+                    "pour le relancer personnellement."
+                )
+                panier_abandonne_actif_actuel = str(config.get("panier_abandonne_actif", "non")) == "oui"
+                nouveau_panier_abandonne_actif = st.checkbox(
+                    "Activer la relance des paniers abandonnés",
+                    value=panier_abandonne_actif_actuel
+                )
+                try:
+                    valeur_delai_actuelle = int(float(config.get("delai_relance_panier_minutes", 60)))
+                except (ValueError, TypeError):
+                    valeur_delai_actuelle = 60
+                nouveau_delai_relance = st.number_input(
+                    "Délai avant relance (minutes)",
+                    min_value=5, max_value=1440, step=5, value=valeur_delai_actuelle
+                )
+                if st.form_submit_button("💾 Enregistrer"):
+                    reponse, err = call_passerelle_admin({
+                        "action": "modifier_config",
+                        "nouveau_panier_abandonne_actif": "oui" if nouveau_panier_abandonne_actif else "non",
+                        "nouveau_delai_relance_panier_minutes": nouveau_delai_relance
+                    })
+                    if err or not reponse or reponse.get("status") != "success":
+                        st.error(f"❌ Erreur : {err or (reponse or {}).get('message', '')}")
+                    else:
+                        st.toast("✅ Paramètres de relance mis à jour !")
                         load_config.clear()
                         st.rerun()
 
