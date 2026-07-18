@@ -1276,13 +1276,23 @@ with st.sidebar:
                 # Récupère la ligne actuelle de l'article sélectionné
                 row_edit = df_catalogue[df_catalogue['nom'].astype(str) == article_to_edit].iloc[0]
 
-                with st.form("edit_form"):
+                # 🔧 FIX (bug réel : "seul le premier article se modifie") : sans clé
+                # unique, Streamlit associe "Nom de l'article", "Prix", etc. à un seul
+                # widget interne qui garde en mémoire les valeurs du PREMIER article
+                # ouvert dans ce formulaire — changer la sélection ne rafraîchissait
+                # donc que la photo (qui n'est pas un widget interactif), pas les
+                # champs texte/nombre. On force un widget distinct par article en
+                # suffixant chaque clé par son identifiant stable (ou son nom à défaut).
+                cle_article = str(row_edit.get('id', '') or article_to_edit)
+
+                with st.form(f"edit_form_{cle_article}"):
                     col_img1, col_img2 = st.columns([1, 2])
                     with col_img1:
                         st.image(row_edit.get('image', ''), width=120, caption="Photo principale actuelle")
                     with col_img2:
                         nouvelle_photo = st.file_uploader(
-                            "Remplacer la photo principale (optionnel)", type=["jpg", "png", "jpeg"], key="edit_photo"
+                            "Remplacer la photo principale (optionnel)", type=["jpg", "png", "jpeg"],
+                            key=f"edit_photo_{cle_article}"
                         )
 
                     photos_supp_actuelles = parse_image_list(row_edit.get('images_supplementaires', ''))
@@ -1294,18 +1304,21 @@ with st.sidebar:
                                 st.image(url_apercu, width=80)
 
                     supprimer_photos_supp = st.checkbox(
-                        "🗑️ Supprimer toutes les photos supplémentaires actuelles", key="edit_supp_clear"
+                        "🗑️ Supprimer toutes les photos supplémentaires actuelles",
+                        key=f"edit_supp_clear_{cle_article}"
                     ) if photos_supp_actuelles else False
 
                     nouvelles_photos_supp = st.file_uploader(
                         "Ajouter des photos supplémentaires (optionnel)", type=["jpg", "png", "jpeg"],
-                        accept_multiple_files=True, key="edit_photos_supp"
+                        accept_multiple_files=True, key=f"edit_photos_supp_{cle_article}"
                     )
 
-                    nouveau_nom = st.text_input("Nom de l'article", value=str(row_edit.get('nom', '')))
+                    nouveau_nom = st.text_input(
+                        "Nom de l'article", value=str(row_edit.get('nom', '')), key=f"edit_nom_{cle_article}"
+                    )
                     nouveau_prix = st.number_input(
                         "Prix (FCFA)", min_value=0, step=1000,
-                        value=int(row_edit.get('prix_numeric', 0))
+                        value=int(row_edit.get('prix_numeric', 0)), key=f"edit_prix_{cle_article}"
                     )
                     valeur_promo_actuelle = row_edit.get('prix_promo_numeric', None)
                     try:
@@ -1315,19 +1328,20 @@ with st.sidebar:
                     nouveau_prix_promo = st.number_input(
                         "Prix promotionnel (FCFA, optionnel)", min_value=0, step=1000,
                         value=valeur_promo_actuelle,
-                        help="Laisser à 0 pour désactiver la promo. Doit être inférieur au prix normal."
+                        help="Laisser à 0 pour désactiver la promo. Doit être inférieur au prix normal.",
+                        key=f"edit_prix_promo_{cle_article}"
                     )
                     nouvelles_tailles = st.text_input(
-                        "Tailles", value=str(row_edit.get('tailles', '') or '')
+                        "Tailles", value=str(row_edit.get('tailles', '') or ''), key=f"edit_tailles_{cle_article}"
                     )
                     nouvelles_couleurs = st.text_input(
-                        "Couleurs", value=str(row_edit.get('couleurs', '') or '')
+                        "Couleurs", value=str(row_edit.get('couleurs', '') or ''), key=f"edit_couleurs_{cle_article}"
                     )
                     nouvelle_categorie = st.text_input(
-                        "Catégorie", value=str(row_edit.get('categorie', '') or '')
+                        "Catégorie", value=str(row_edit.get('categorie', '') or ''), key=f"edit_categorie_{cle_article}"
                     )
                     nouveau_stock = st.number_input(
-                        "Stock", min_value=0, value=int(row_edit.get('stock', 0))
+                        "Stock", min_value=0, value=int(row_edit.get('stock', 0)), key=f"edit_stock_{cle_article}"
                     )
 
                     if st.form_submit_button("💾 Enregistrer les modifications"):
