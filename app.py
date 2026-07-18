@@ -209,8 +209,19 @@ def get_unique_values(df, col):
 def get_identifiant(row):
     """Identifiant stable d'un produit (son id s'il existe, sinon son nom) —
     utilisé pour la wishlist et la galerie photo, PAS la position de la ligne
-    dans le tableau qui change à chaque tri/filtre."""
-    return str(row.get('id', '') or '').strip() or str(row.get('nom', ''))
+    dans le tableau qui change à chaque tri/filtre.
+    🔧 FIX : une cellule "id" vide devient NaN en pandas, qui est "vrai" en
+    Python (contrairement à une chaîne vide) — donc str(NaN) = "nan" était
+    utilisé comme identifiant partagé par TOUS les articles sans id, ce qui
+    faisait apparaître un seul favori comme s'il s'appliquait à tout le monde.
+    """
+    id_val = row.get('id', '')
+    if pd.isna(id_val):
+        id_val = ''
+    id_val = str(id_val).strip()
+    if id_val:
+        return id_val
+    return str(row.get('nom', ''))
 
 def parse_variants(valeur):
     """Découpe une chaîne 'S, M, L' ou 'Rouge / Bleu' en liste de valeurs propres, sans doublons."""
