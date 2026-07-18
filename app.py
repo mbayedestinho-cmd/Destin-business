@@ -857,9 +857,17 @@ with st.sidebar:
 
         if pwd:
             verif, err = call_passerelle({"action": "connexion_admin", "password": pwd})
+            # 🔧 FIX : "admin_input" est un widget à clé fixe — sans ce nettoyage,
+            # Streamlit renvoie la même valeur "pwd" à CHAQUE rerun suivant (le
+            # moindre clic ailleurs sur la page), donc "if pwd:" redevenait vrai
+            # et relançait connexion_admin en boucle : reconnexion silencieuse
+            # après un logout, et surtout re-consommation d'une tentative anti
+            # brute-force à chaque clic après une saisie de mot de passe erronée.
+            del st.session_state["admin_input"]
             if not err and verif and verif.get("status") == "success":
                 st.session_state.admin_logged_in = True
                 st.session_state.admin_token = verif.get("token", "")
+                st.rerun()
             else:
                 st.error("❌ Mot de passe incorrect")
                 st.session_state.admin_logged_in = False
@@ -878,6 +886,14 @@ with st.sidebar:
                 call_passerelle_admin({"action": "deconnexion_admin"})
                 st.session_state.admin_logged_in = False
                 st.session_state.admin_token = ""
+                # 🔧 FIX : le champ "Mot de passe admin" (key="admin_input") garde
+                # sa valeur d'un run à l'autre car c'est un widget Streamlit avec
+                # une clé. Sans ce nettoyage, le prochain rerun réaffichait le
+                # champ encore rempli avec l'ancien mot de passe -> "if pwd:"
+                # redevenait vrai -> reconnexion automatique immédiate, qui
+                # annulait silencieusement la déconnexion qu'on venait de faire.
+                if "admin_input" in st.session_state:
+                    del st.session_state["admin_input"]
                 st.rerun()
 
         # 🔒 FIX SÉCURITÉ : l'email admin n'est plus renvoyé par l'appel
