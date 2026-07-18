@@ -330,6 +330,26 @@ def load_data(sheet_id, refresh_token=0):
     try:
         url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=Catalogue"
         df = pd.read_csv(url)
+
+        # 🔧 FIX AFFICHAGE PROMO : "images_supplementaires" (10e colonne) et
+        # "prix_promo" (11e colonne) sont TOUJOURS écrites à ces positions
+        # fixes par Code.gs (ajout_article / modification_article), quel que
+        # soit le texte réellement présent dans l'en-tête de ces colonnes sur
+        # le Sheet. Avant ce correctif, on ne les retrouvait QUE si leur
+        # en-tête correspondait à un nom attendu — un en-tête vide, mal
+        # orthographié ou simplement différent ("Prix Promotionnel" au lieu
+        # de "Prix Promo") faisait passer la colonne pour "Unnamed", et elle
+        # était supprimée juste en dessous, avant même d'atteindre
+        # calculer_prix_effectif : la promo restait donc invisible même si
+        # elle était bien enregistrée. On fixe maintenant ces deux noms par
+        # POSITION, qui est la seule chose garantie par le script d'écriture.
+        colonnes = list(df.columns)
+        if len(colonnes) > 9:
+            colonnes[9] = "images_supplementaires"
+        if len(colonnes) > 10:
+            colonnes[10] = "prix_promo"
+        df.columns = colonnes
+
         df.columns = [normalize_col(col) for col in df.columns]
         df = df.loc[:, ~df.columns.str.contains('^unnamed', case=False)]
         df = df.dropna(subset=['nom', 'prix'])
@@ -734,6 +754,10 @@ if not df_f.empty:
                 else:
                     st.session_state.cart.append({
                         "id": str(uuid.uuid4()),
+                        # 🔧 FIX FIABILITÉ : identifiant catalogue réel de l'article (colonne
+                        # "id" du Sheet), transmis au serveur pour qu'il retrouve la bonne
+                        # ligne sans ambiguïté même si deux articles partagent le même nom.
+                        "produit_id": str(row.get('id', '') or ''),
                         "nom": row['nom'],
                         "prix": prix,
                         "image": row.get('image', ''),
@@ -829,6 +853,29 @@ with st.sidebar:
                 st.session_state.admin_token = ""
 
     if st.session_state.admin_logged_in:
+        # 🔒 FIX SÉCURITÉ : bouton de déconnexion explicite. Avant ce correctif,
+        # il n'existait aucun moyen de révoquer le jeton de session côté
+        # serveur — il restait valable jusqu'à expiration (6h) même après
+        # avoir quitté la page. Le clic appelle "deconnexion_admin" pour que
+        # le jeton soit immédiatement invalidé côté serveur, puis nettoie la
+        # session locale.
+        col_titre_admin, col_deconnexion = st.columns([4, 1])
+        with col_deconnexion:
+            if st.button("🚪 Se déconnecter", use_container_width=True):
+                call_passerelle_admin({"action": "deconnexion_admin"})
+                st.session_state.admin_logged_in = False
+                st.session_state.admin_token = ""
+                st.rerun()
+
+        # 🔒 FIX SÉCURITÉ : l'email admin n'est plus renvoyé par l'appel
+        # public "get_config" (voir Code.gs) — on le récupère ici séparément,
+        # via un appel authentifié, uniquement pour préremplir le formulaire
+        # ⚙️ Paramètres ci-dessous. `config` reste inchangé pour tout le
+        # reste de la page (nom, logo, whatsapp restent publics).
+        config_admin, _err_config_admin = call_passerelle_admin({"action": "get_config"})
+        if config_admin and config_admin.get("status") == "success":
+            config = {**config, "email_admin": config_admin.get("email_admin", "")}
+
         tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Dashboard", "➕ Ajouter", "✏️ Modifier", "🗑️ Supprimer", "⚙️ Paramètres"])
 
         with tab1:  # DASHBOARD
