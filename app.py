@@ -8,6 +8,7 @@ import time
 import uuid
 import re
 import unicodedata
+import html as _html
 
 st.set_page_config(page_title="Collection Luxe N'Djamena", page_icon="✨", layout="wide")
 
@@ -306,19 +307,21 @@ NOM_BOUTIQUE = config["nom_boutique"]
 NUMERO_WHATSAPP = re.sub(r"\D", "", str(config.get("whatsapp") or ""))
 LOGO_URL = config.get("logo") or ""
 
+nom_boutique_echappe = _html.escape(str(NOM_BOUTIQUE))
 if LOGO_URL:
+    logo_url_echappee = _html.escape(str(LOGO_URL), quote=True)
     st.markdown(
         f'''<div class="hero-banner">
-                <img class="hero-bg" src="{LOGO_URL}">
+                <img class="hero-bg" src="{logo_url_echappee}">
                 <div class="hero-content">
-                    <h1>{NOM_BOUTIQUE}</h1>
+                    <h1>{nom_boutique_echappe}</h1>
                     <p>Élégance &amp; Raffinement</p>
                 </div>
             </div>''',
         unsafe_allow_html=True
     )
 else:
-    st.markdown(f'<div class="hero"><h1 class="main-title">{NOM_BOUTIQUE}</h1></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="hero"><h1 class="main-title">{nom_boutique_echappe}</h1></div>', unsafe_allow_html=True)
 
 # ====================== CHARGEMENT DONNÉES ======================
 # ⚠️ FIX : le paramètre ne doit PAS commencer par "_" (Streamlit ignore les
@@ -659,13 +662,23 @@ if not df_f.empty:
                 if en_promo else
                 f'<div class="price">{format_fcfa(prix)}</div>'
             )
+            # 🔒 FIX SÉCURITÉ (XSS stocké) : "nom" et les URLs d'image viennent du
+            # Google Sheet (donc potentiellement d'un compte admin compromis, ou
+            # de toute personne ayant accès au classeur) et étaient injectés tels
+            # quels dans un bloc unsafe_allow_html=True. Un nom d'article ou une
+            # URL contenant du HTML/JS (ex: '"><img src=x onerror=...>') aurait pu
+            # exécuter du code dans le navigateur de chaque visiteur du catalogue.
+            # On échappe systématiquement tout ce qui vient du Sheet avant de
+            # l'insérer dans du HTML brut.
+            nom_echappe = _html.escape(str(row['nom']))
+            image_echappee = _html.escape(str(image_affichee), quote=True)
             st.markdown(f"""
                 <div class="product-card">
-                    <a href="{image_affichee}" target="_blank">
-                        <img src="{image_affichee}" style="width:100%; border-radius:12px; aspect-ratio:1/1; object-fit:cover;"
+                    <a href="{image_echappee}" target="_blank">
+                        <img src="{image_echappee}" style="width:100%; border-radius:12px; aspect-ratio:1/1; object-fit:cover;"
                              onerror="this.src='https://placehold.co/300x300?text=Image+non+disponible';">
                     </a>
-                    <h3>{row['nom']}</h3>
+                    <h3>{nom_echappe}</h3>
                     {bloc_prix}
                     <div class="{'stock-low' if stock < 5 else 'stock'}">Stock : {stock} pièce(s)</div>
                 </div>
