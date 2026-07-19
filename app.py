@@ -8,6 +8,7 @@ import time
 import uuid
 import re
 import unicodedata
+import html as html_lib
 
 st.set_page_config(page_title="Collection Luxe N'Djamena", page_icon="✨", layout="wide")
 
@@ -330,19 +331,30 @@ NOM_BOUTIQUE = config["nom_boutique"]
 NUMERO_WHATSAPP = re.sub(r"\D", "", str(config.get("whatsapp") or ""))
 LOGO_URL = config.get("logo") or ""
 
-if LOGO_URL:
+# 🔒 FIX SÉCURITÉ (XSS stocké) : nom_boutique et logo viennent du Sheet et
+# sont injectés en HTML brut (unsafe_allow_html=True) juste en dessous. S'ils
+# ne sont jamais échappés, un compte admin compromis (ou une modification
+# directe du Sheet) pourrait y placer du HTML/JS qui s'exécute pour TOUS les
+# visiteurs de la boutique. On échappe le nom, et on n'accepte le logo que
+# s'il s'agit bien d'une URL http(s) — jamais d'un "javascript:" ou autre
+# schéma exécutable.
+NOM_BOUTIQUE_AFFICHE = html_lib.escape(str(NOM_BOUTIQUE))
+LOGO_URL_SUR = LOGO_URL if re.match(r"^https?://", str(LOGO_URL).strip(), re.IGNORECASE) else ""
+LOGO_URL_AFFICHE = html_lib.escape(LOGO_URL_SUR, quote=True)
+
+if LOGO_URL_SUR:
     st.markdown(
         f'''<div class="hero-banner">
-                <img class="hero-bg" src="{LOGO_URL}">
+                <img class="hero-bg" src="{LOGO_URL_AFFICHE}">
                 <div class="hero-content">
-                    <h1>{NOM_BOUTIQUE}</h1>
+                    <h1>{NOM_BOUTIQUE_AFFICHE}</h1>
                     <p>Élégance &amp; Raffinement</p>
                 </div>
             </div>''',
         unsafe_allow_html=True
     )
 else:
-    st.markdown(f'<div class="hero"><h1 class="main-title">{NOM_BOUTIQUE}</h1></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="hero"><h1 class="main-title">{NOM_BOUTIQUE_AFFICHE}</h1></div>', unsafe_allow_html=True)
 
 # ====================== CHARGEMENT DONNÉES ======================
 # ⚠️ FIX : le paramètre ne doit PAS commencer par "_" (Streamlit ignore les
@@ -687,6 +699,13 @@ if not df_f.empty:
             st.session_state[cle_galerie] = st.session_state[cle_galerie] % len(galerie)
             image_affichee = galerie[st.session_state[cle_galerie]]
 
+            # 🔒 FIX SÉCURITÉ (XSS stocké) : nom et image viennent du Catalogue
+            # (Google Sheet) et sont injectés en HTML brut juste en dessous —
+            # même raisonnement que pour le nom de boutique/logo plus haut.
+            nom_affiche = html_lib.escape(str(row['nom']))
+            image_affichee_sure = image_affichee if re.match(r"^https?://", str(image_affichee).strip(), re.IGNORECASE) else ""
+            image_affichee_html = html_lib.escape(image_affichee_sure, quote=True)
+
             reduction_pct = round((1 - prix / prix_original) * 100) if en_promo and prix_original > 0 else 0
             bloc_prix = (
                 f'<div class="badge-promo">PROMO -{reduction_pct}%</div><br>'
@@ -697,11 +716,11 @@ if not df_f.empty:
             )
             st.markdown(f"""
                 <div class="product-card">
-                    <a href="{image_affichee}" target="_blank">
-                        <img src="{image_affichee}" style="width:100%; border-radius:12px; aspect-ratio:1/1; object-fit:cover;"
+                    <a href="{image_affichee_html}" target="_blank">
+                        <img src="{image_affichee_html}" style="width:100%; border-radius:12px; aspect-ratio:1/1; object-fit:cover;"
                              onerror="this.src='https://placehold.co/300x300?text=Image+non+disponible';">
                     </a>
-                    <h3>{row['nom']}</h3>
+                    <h3>{nom_affiche}</h3>
                     {bloc_prix}
                     <div class="{'stock-low' if stock < 5 else 'stock'}">Stock : {stock} pièce(s)</div>
                     {bloc_avis}
