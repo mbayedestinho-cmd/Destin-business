@@ -208,6 +208,12 @@ def normalize_col(col):
     col = re.sub(r'\s+', '_', col)
     return col
 
+def normaliser_pour_comparaison(valeur):
+    """Miroir Python de normaliserPourComparaison_() côté Apps Script — NFC +
+    espaces superflus retirés — pour que les clés utilisées ici correspondent
+    à celles normalisées côté serveur (ex: dictionnaire avis_moyennes)."""
+    return unicodedata.normalize('NFC', str(valeur or '')).strip()
+
 def get_unique_values(df, col):
     """Retourne la liste des valeurs uniques d'une colonne, sans planter si elle est absente."""
     if df.empty or col not in df.columns:
@@ -678,7 +684,10 @@ if not df_f.empty:
 
             # 🆕 AVIS CLIENTS : note moyenne + nombre d'avis de cet article (déjà
             # chargés en une seule fois pour tout le catalogue dans avis_moyennes).
-            info_avis = avis_moyennes.get(identifiant_produit) or avis_moyennes.get(row['nom'])
+            info_avis = (
+                avis_moyennes.get(normaliser_pour_comparaison(identifiant_produit))
+                or avis_moyennes.get(normaliser_pour_comparaison(row['nom']))
+            )
             bloc_avis = (
                 f'<div style="margin-top:4px; font-size:0.9rem; color:#b58328;">'
                 f'{format_etoiles(info_avis["moyenne"])} '
