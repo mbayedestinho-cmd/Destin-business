@@ -200,18 +200,6 @@ def format_etoiles(moyenne):
     pleines = round(moyenne)
     return "⭐" * pleines + "☆" * (5 - pleines)
 
-def image_valide(valeur):
-    """Nettoie une valeur d'image venant du Sheet et renvoie '' si elle est
-    absente. 🔧 FIX BUG PHOTOS : une cellule 'image' vide devient NaN en
-    pandas ; str(NaN) donne littéralement le texte "nan", qui passait ensuite
-    tous les tests de "valeur non vide" (bool(nan) est True) et finissait
-    comme src="nan" dans la fiche produit (photo cassée) ou faisait planter
-    st.image() dans les onglets Modifier/Supprimer (qui n'acceptent pas NaN)."""
-    if valeur is None or (isinstance(valeur, float) and pd.isna(valeur)):
-        return ""
-    texte = str(valeur).strip()
-    return "" if texte.lower() in ("", "nan", "none") else texte
-
 def normalize_col(col):
     """Met en minuscule, remplace les espaces par des underscores et supprime les accents d'un nom de colonne."""
     col = str(col).lower().strip()
@@ -266,48 +254,16 @@ def parse_image_list(valeur):
             vues.append(m)
     return vues
 
-# 🔧 FIX BUG UPLOAD SILENCIEUX : cette fonction avalait certains échecs sans
-# les signaler. Trois cas précis passaient inaperçus (aucune erreur affichée,
-# mais pas d'image non plus) :
-#  1. ImgBB peut répondre avec un code HTTP 200 mais "success": false (clé API
-#     invalide, format non pris en charge comme certains .webp, etc.) — seul
-#     res.status_code était vérifié, jamais le contenu réel de la réponse.
-#  2. Une réponse non-JSON (page d'erreur HTML d'un proxy, etc.) faisait
-#     planter res.json() AVANT le return, remontant un message peu clair.
-#  3. Aucune limite de taille : un très gros fichier peut dépasser le timeout
-#     réseau et échouer sans qu'on sache pourquoi.
-TAILLE_MAX_IMAGE_MO = 20
-
 def upload_image_to_imgbb(file_bytes):
-    if not file_bytes:
-        return None, "Fichier vide ou illisible"
-    if len(file_bytes) > TAILLE_MAX_IMAGE_MO * 1024 * 1024:
-        return None, f"Image trop lourde (max {TAILLE_MAX_IMAGE_MO} Mo) — réduis la taille du fichier"
-    if not IMGBB_API_KEY:
-        return None, "Clé API ImgBB manquante (à configurer dans les secrets de l'appli)"
-
     try:
         b64 = base64.b64encode(file_bytes).decode()
         res = requests.post("https://api.imgbb.com/1/upload",
-                           data={"key": IMGBB_API_KEY, "image": b64}, timeout=30)
-    except requests.exceptions.Timeout:
-        return None, "L'envoi a expiré (connexion trop lente ou fichier trop lourd)"
+                           data={"key": IMGBB_API_KEY, "image": b64}, timeout=25)
+        if res.status_code != 200:
+            return None, "Erreur upload ImgBB"
+        return res.json()["data"]["url"], None
     except Exception as e:
-        return None, f"Erreur réseau lors de l'envoi : {e}"
-
-    try:
-        data_json = res.json()
-    except ValueError:
-        return None, f"Réponse invalide de l'hébergeur d'images (code {res.status_code})"
-
-    if res.status_code != 200 or not data_json.get("success"):
-        message_erreur = (data_json.get("error") or {}).get("message")
-        return None, message_erreur or f"Échec de l'envoi (code {res.status_code})"
-
-    url = (data_json.get("data") or {}).get("url")
-    if not url:
-        return None, "L'hébergeur d'images n'a renvoyé aucune URL"
-    return url, None
+        return None, str(e)
 
 def call_passerelle(payload, timeout=20):
     try:
@@ -721,10 +677,10 @@ if not df_f.empty:
 
             # Galerie : photo principale + photos supplémentaires (colonne "images_supplementaires")
             galerie = [g for g in (
-                [image_valide(row.get('image', ''))] + parse_image_list(row.get('images_supplementaires', ''))
+                [str(row.get('image', '') or '')] + parse_image_list(row.get('images_supplementaires', ''))
             ) if g]
             if not galerie:
-                galerie = ['https://placehold.co/300x300?text=Image+non+disponible']
+                galerie = ['']
             cle_galerie = f"galerie_{identifiant_produit}"
             if cle_galerie not in st.session_state:
                 st.session_state[cle_galerie] = 0
@@ -1377,11 +1333,7 @@ with st.sidebar:
                 with st.form("edit_form"):
                     col_img1, col_img2 = st.columns([1, 2])
                     with col_img1:
-                        photo_actuelle = image_valide(row_edit.get('image', ''))
-                        if photo_actuelle:
-                            st.image(photo_actuelle, width=120, caption="Photo principale actuelle")
-                        else:
-                            st.caption("Pas de photo actuelle")
+                        st.image(row_edit.get('image', ''), width=120, caption="Photo principale actuelle")
                     with col_img2:
                         nouvelle_photo = st.file_uploader(
                             "Remplacer la photo principale (optionnel)", type=["jpg", "png", "jpeg"], key="edit_photo"
@@ -1494,11 +1446,7 @@ with st.sidebar:
                 row_suppr = df_catalogue[df_catalogue['nom'].astype(str) == article_suppr].iloc[0]
                 col_prev1, col_prev2 = st.columns([1, 2])
                 with col_prev1:
-                    photo_suppr = image_valide(row_suppr.get('image', ''))
-                    if photo_suppr:
-                        st.image(photo_suppr, width=120)
-                    else:
-                        st.caption("Pas de photo")
+                    st.image(row_suppr.get('image', ''), width=120)
                 with col_prev2:
                     st.write(f"**{article_suppr}**")
                     st.write(f"Prix : {format_fcfa(row_suppr.get('prix_numeric', 0))}")
@@ -1568,10 +1516,7 @@ with st.sidebar:
             if LOGO_URL:
                 st.image(LOGO_URL, width=140, caption="Logo actuel")
             nouveau_logo_fichier = st.file_uploader(
-                # 🔧 FIX : "webp" retiré — ImgBB ne traite pas toujours ce format de
-                # façon fiable via son API, ce qui provoquait un échec d'envoi du
-                # logo sans qu'aucune image ne soit finalement enregistrée.
-                "Choisir une nouvelle image de logo", type=["png", "jpg", "jpeg"], key="upload_logo"
+                "Choisir une nouvelle image de logo", type=["png", "jpg", "jpeg", "webp"], key="upload_logo"
             )
             if st.button("💾 Enregistrer le logo", disabled=nouveau_logo_fichier is None):
                 with st.spinner("Envoi de l'image..."):
