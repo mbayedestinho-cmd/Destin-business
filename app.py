@@ -541,9 +541,9 @@ else:
 
         with tab_catalogue:
             st.write("### Articles existants")
-            for _, row in df_catalogue.iterrows():
+            for idx_row, row in enumerate(df_catalogue.to_dict("records")):
                 with st.expander(f"{row['nom']} — stock {int(row.get('stock') or 0)}"):
-                    with st.form(f"edit_{row['id']}"):
+                    with st.form(f"edit_{idx_row}_{row['id']}"):
                         nouveau_nom = st.text_input("Nom", value=row["nom"])
                         nouveau_prix = st.number_input("Prix", value=float(row.get("prix") or 0))
                         nouveau_stock = st.number_input("Stock", value=int(row.get("stock") or 0), step=1)
@@ -552,11 +552,11 @@ else:
                         nouvelles_couleurs = st.text_input("Couleurs (séparées par virgule)", value=row.get("couleurs") or "")
 
                         nouvelle_image_fichier = st.file_uploader(
-                            "Remplacer l'image principale", type=["jpg", "jpeg", "png", "webp"], key=f"img_{row['id']}"
+                            "Remplacer l'image principale", type=["jpg", "jpeg", "png", "webp"], key=f"img_{idx_row}_{row['id']}"
                         )
                         nouvelles_images_supp = st.file_uploader(
                             "Ajouter des images supplémentaires", type=["jpg", "jpeg", "png", "webp"],
-                            accept_multiple_files=True, key=f"imgs_{row['id']}"
+                            accept_multiple_files=True, key=f"imgs_{idx_row}_{row['id']}"
                         )
 
                         if st.form_submit_button("Enregistrer"):
@@ -582,7 +582,7 @@ else:
                             forcer_rafraichissement()
                             st.success("Article mis à jour")
                             st.rerun()
-                    if st.button("🗑️ Supprimer", key=f"del_{row['id']}"):
+                    if st.button("🗑️ Supprimer", key=f"del_{idx_row}_{row['id']}"):
                         sb_admin.table("catalogue").delete().eq("id", row["id"]).execute()
                         forcer_rafraichissement()
                         st.rerun()
@@ -665,15 +665,15 @@ else:
         with tab_commandes:
             reponse = sb_admin.table("commandes").select("*").order("date", desc=True).limit(100).execute()
             statuts_possibles = ["En cours", "Confirmée", "Livrée", "Annulée"]
-            for cmd in reponse.data:
+            for idx_cmd, cmd in enumerate(reponse.data):
                 with st.expander(f"{cmd.get('id')} — {cmd.get('client_nom')} — {cmd.get('price')} FCFA — {cmd.get('statut')}"):
                     st.json(cmd.get("articles"))
                     statut_actuel = cmd.get("statut", "En cours")
                     index_defaut = statuts_possibles.index(statut_actuel) if statut_actuel in statuts_possibles else 0
                     nouveau_statut = st.selectbox(
-                        "Statut", statuts_possibles, index=index_defaut, key=f"statut_{cmd['id']}"
+                        "Statut", statuts_possibles, index=index_defaut, key=f"statut_{idx_cmd}_{cmd.get('id')}"
                     )
-                    if st.button("Mettre à jour", key=f"maj_{cmd['id']}"):
+                    if st.button("Mettre à jour", key=f"maj_{idx_cmd}_{cmd.get('id')}"):
                         sb_admin.table("commandes").update({"statut": nouveau_statut}).eq("id", cmd["id"]).execute()
                         st.rerun()
 
@@ -681,15 +681,15 @@ else:
             reponse = sb_admin.table("avis").select("*").eq("statut", "en_attente").execute()
             if not reponse.data:
                 st.caption("Aucun avis en attente")
-            for avis_item in reponse.data:
+            for idx_avis, avis_item in enumerate(reponse.data):
                 with st.expander(f"{avis_item['client_nom']} — {avis_item['article_nom']} — {'⭐' * int(avis_item['note'])}"):
                     st.write(avis_item.get("commentaire") or "(pas de commentaire)")
                     col1, col2 = st.columns(2)
-                    if col1.button("✅ Approuver", key=f"appr_{avis_item['id']}"):
+                    if col1.button("✅ Approuver", key=f"appr_{idx_avis}_{avis_item['id']}"):
                         sb_admin.table("avis").update({"statut": "approuve"}).eq("id", avis_item["id"]).execute()
                         forcer_rafraichissement()
                         st.rerun()
-                    if col2.button("🗑️ Supprimer", key=f"suppr_avis_{avis_item['id']}"):
+                    if col2.button("🗑️ Supprimer", key=f"suppr_avis_{idx_avis}_{avis_item['id']}"):
                         sb_admin.table("avis").delete().eq("id", avis_item["id"]).execute()
                         forcer_rafraichissement()
                         st.rerun()
@@ -722,7 +722,7 @@ else:
             paniers = sorted(reponse.data, key=lambda p: p.get("date_derniere_maj", ""), reverse=True)
             if not paniers:
                 st.caption("Aucun panier abandonné en attente")
-            for panier in paniers:
+            for idx_panier, panier in enumerate(paniers):
                 total = panier.get("total") or 0
                 with st.expander(f"{panier.get('client_nom') or 'Client'} — {panier.get('telephone')} — {total} FCFA"):
                     st.json(panier.get("articles"))
@@ -731,6 +731,6 @@ else:
                         message = f"Bonjour, vous avez laissé des articles dans votre panier sur {config.get('nom_boutique', 'notre boutique')} — puis-je vous aider à finaliser votre commande ?"
                         lien_whatsapp = f"https://wa.me/{tel_relance}?text={requests.utils.quote(message)}"
                         st.link_button("💬 Relancer sur WhatsApp", lien_whatsapp)
-                    if st.button("🗑️ Marquer comme traité", key=f"panier_traite_{panier.get('telephone')}"):
+                    if st.button("🗑️ Marquer comme traité", key=f"panier_traite_{idx_panier}_{panier.get('telephone')}"):
                         sb_admin.table("paniersabandonnés").update({"statut": "traite"}).eq("telephone", panier["telephone"]).execute()
                         st.rerun()
