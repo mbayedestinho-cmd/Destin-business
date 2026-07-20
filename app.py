@@ -583,9 +583,22 @@ else:
                             st.success("Article mis à jour")
                             st.rerun()
                     if st.button("🗑️ Supprimer", key=f"del_{idx_row}_{row['id']}"):
-                        sb_admin.table("catalogue").delete().eq("id", row["id"]).execute()
-                        forcer_rafraichissement()
-                        st.rerun()
+                        try:
+                            sb_admin.table("catalogue").delete().eq("id", row["id"]).execute()
+                            forcer_rafraichissement()
+                            st.success("Article supprimé")
+                            st.rerun()
+                        except Exception as e:
+                            message_erreur = str(e)
+                            if "23503" in message_erreur or "foreign key" in message_erreur.lower():
+                                st.error(
+                                    "Impossible de supprimer cet article : il est encore référencé par au moins "
+                                    "une commande, un avis, une alerte stock ou un panier abandonné. "
+                                    "Tu peux plutôt mettre son stock à 0 pour le masquer, ou supprimer d'abord "
+                                    "les éléments liés."
+                                )
+                            else:
+                                st.error(f"Échec de la suppression : {message_erreur}")
 
             st.write("### Ajouter un article")
             with st.form("ajout_article", clear_on_submit=True):
