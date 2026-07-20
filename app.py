@@ -240,13 +240,17 @@ LOGO_URL = config.get("logo", "")
 LOGO_SUR = LOGO_URL if re.match(r"^https?://", str(LOGO_URL).strip(), re.IGNORECASE) else ""
 WHATSAPP = re.sub(r"\D", "", str(config.get("whatsapp") or ""))
 
-onglet_boutique, onglet_admin = st.tabs(["🛍️ Boutique", "🔐 Admin"])
+# 🔒 FIX : l'admin n'apparaît plus comme un onglet visible par tous les
+# visiteurs. Seule une personne connaissant l'URL secrète
+# "https://tonapp.streamlit.app/?admin=1" voit l'interface de connexion
+# admin -- les clients normaux ne voient que la boutique.
+mode_admin = st.query_params.get("admin") == "1"
 
-with onglet_boutique:
+if not mode_admin:
     if LOGO_SUR:
         st.markdown(
             f'<div style="text-align:center;"><img src="{html_lib.escape(LOGO_SUR, quote=True)}" '
-            f'style="max-height:120px;"><h1>{NOM_BOUTIQUE}</h1></div>',
+            f'style="max-height:220px;"><h1>{NOM_BOUTIQUE}</h1></div>',
             unsafe_allow_html=True
         )
     else:
@@ -438,7 +442,7 @@ with onglet_boutique:
 
 
 # ====================== 8. ADMIN ======================
-with onglet_admin:
+else:
     if not st.session_state.admin_connecte:
         st.subheader("Connexion admin")
         email_admin = st.text_input("Email")
