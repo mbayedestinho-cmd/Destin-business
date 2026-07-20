@@ -5,6 +5,7 @@ import re
 import html as html_lib
 import unicodedata
 import base64
+import hashlib
 import smtplib
 import requests
 from email.mime.text import MIMEText
@@ -13,8 +14,72 @@ from supabase import create_client, Client
 
 st.set_page_config(page_title="Destiny Luxury Collection", page_icon="👗", layout="wide")
 
+# ====================== 0. STYLE (thème "luxe" sobre : fond sombre, accents dorés) ======================
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&display=swap');
+
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+    h1, h2, h3 { font-family: 'Playfair Display', serif !important; letter-spacing: 0.3px; }
+
+    .stApp { background: linear-gradient(180deg, #0d0d0f 0%, #16151a 100%); }
+
+    /* Cartes produit */
+    div[data-testid="column"] > div > div[data-testid="stVerticalBlockBorderWrapper"],
+    div[data-testid="stVerticalBlock"] div.element-container:has(img) {
+        border-radius: 14px;
+    }
+    img {
+        border-radius: 12px !important;
+    }
+
+    /* Boutons */
+    .stButton > button {
+        border-radius: 8px;
+        border: 1px solid #c9a35c;
+        color: #c9a35c;
+        background: transparent;
+        font-weight: 500;
+        transition: all 0.2s ease;
+    }
+    .stButton > button:hover {
+        background: #c9a35c;
+        color: #16151a;
+        border-color: #c9a35c;
+    }
+    .stFormSubmitButton > button {
+        border-radius: 8px;
+        background: #c9a35c;
+        color: #16151a;
+        font-weight: 600;
+        border: none;
+    }
+    .stFormSubmitButton > button:hover {
+        background: #dab873;
+    }
+
+    /* Prix et titres produits */
+    div[data-testid="stMarkdownContainer"] strong { color: #eae4d8; }
+
+    /* Bandeau logo */
+    .destiny-hero { text-align:center; padding: 2rem 0 1rem 0; }
+    .destiny-hero h1 { font-size: 2.4rem; color: #eae4d8; margin-top: 0.8rem; }
+    .destiny-hero img { border-radius: 16px; box-shadow: 0 8px 30px rgba(201,163,92,0.15); }
+</style>
+""", unsafe_allow_html=True)
+
 # ====================== 1. SECRETS ======================
-SECRETS_REQUIS = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "IMGBB_API_KEY"]
+# 🔒 FIX : après un très long aller-retour infructueux avec Supabase Auth
+# (confirmation d'email, CAPTCHA, providers...), on repart sur le système
+# simple qu'avait l'app Apps Script d'origine : un mot de passe hashé
+# (SHA-256) stocké dans la table config, comparé directement en Python.
+# Zéro dépendance à Supabase Auth = zéro risque de retomber sur "Invalid
+# login credentials" pour des raisons de configuration externes.
+# SUPABASE_SECRET_KEY (clé "secret" / service_role) est nécessaire pour que
+# les actions admin puissent lire/écrire en base MÊME si les policies RLS
+# ne couvrent que le rôle anon -- cette clé bypasse RLS, donc ne la mets
+# JAMAIS ailleurs que dans st.secrets.
+SECRETS_REQUIS = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SECRET_KEY", "IMGBB_API_KEY"]
 SECRETS_MANQUANTS = [s for s in SECRETS_REQUIS if s not in st.secrets]
 if SECRETS_MANQUANTS:
     st.error(f"Secrets manquants : {', '.join(SECRETS_MANQUANTS)}")
@@ -33,33 +98,40 @@ def get_public_client() -> Client:
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_ANON_KEY"])
 
 
+@st.cache_resource
+def get_admin_client() -> Client:
+    # 🔒 La clé secret/service_role bypasse toujours RLS, quel que soit le
+    # visiteur qui exécute le code -- mais l'AFFICHAGE de l'admin reste
+    # protégé par admin_connecte (propre à chaque session ci-dessous), donc
+    # ce n'est utilisable qu'après avoir tapé le bon mot de passe.
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_SECRET_KEY"])
+
+
 sb = get_public_client()
 
-# 🔒 Le client admin ne va JAMAIS dans cache_resource (partagé entre tous
-# les visiteurs) -- uniquement dans st.session_state, propre à chaque session.
-if "sb_admin" not in st.session_state:
-    st.session_state.sb_admin = None
 if "admin_connecte" not in st.session_state:
     st.session_state.admin_connecte = False
 
 
-def admin_login(email, password):
-    client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_ANON_KEY"])
-    resultat = client.auth.sign_in_with_password({"email": email, "password": password})
-    if resultat.user:
-        st.session_state.sb_admin = client
+# 🔑 Pour définir/réinitialiser le mot de passe admin directement en base
+# (si tu ne connais pas le mot de passe original migré depuis Sheets),
+# lance ceci dans le SQL Editor Supabase en remplaçant la valeur :
+#   update config set valeur = encode(sha256('TonNouveauMotDePasse'::bytea), 'hex')
+#   where cle = 'mot_de_passe';
+def hash_mot_de_passe(valeur):
+    return hashlib.sha256(str(valeur or "").encode("utf-8")).hexdigest()
+
+
+def admin_login(mot_de_passe):
+    config_actuelle = charger_config(st.session_state.refresh_token)
+    hash_attendu = config_actuelle.get("mot_de_passe", "")
+    if hash_attendu and hash_mot_de_passe(mot_de_passe) == hash_attendu:
         st.session_state.admin_connecte = True
         return True
     return False
 
 
 def admin_logout():
-    if st.session_state.sb_admin:
-        try:
-            st.session_state.sb_admin.auth.sign_out()
-        except Exception:
-            pass
-    st.session_state.sb_admin = None
     st.session_state.admin_connecte = False
 
 
@@ -249,12 +321,12 @@ mode_admin = st.query_params.get("admin") == "1"
 if not mode_admin:
     if LOGO_SUR:
         st.markdown(
-            f'<div style="text-align:center;"><img src="{html_lib.escape(LOGO_SUR, quote=True)}" '
-            f'style="max-height:220px;"><h1>{NOM_BOUTIQUE}</h1></div>',
+            f'<div class="destiny-hero"><img src="{html_lib.escape(LOGO_SUR, quote=True)}" '
+            f'style="max-height:200px;"><h1>{NOM_BOUTIQUE}</h1></div>',
             unsafe_allow_html=True
         )
     else:
-        st.title(NOM_BOUTIQUE)
+        st.markdown(f'<div class="destiny-hero"><h1>{NOM_BOUTIQUE}</h1></div>', unsafe_allow_html=True)
 
     colonne_produits, colonne_panier = st.columns([3, 1])
 
@@ -445,18 +517,17 @@ if not mode_admin:
 else:
     if not st.session_state.admin_connecte:
         st.subheader("Connexion admin")
-        email_admin = st.text_input("Email")
         mdp_admin = st.text_input("Mot de passe", type="password")
         if st.button("Se connecter"):
             try:
-                if admin_login(email_admin.strip(), mdp_admin):
+                if admin_login(mdp_admin):
                     st.rerun()
                 else:
-                    st.error("Connexion refusée.")
+                    st.error("Mot de passe incorrect.")
             except Exception as e:
                 st.error(f"Échec de connexion : {e}")
     else:
-        sb_admin = st.session_state.sb_admin
+        sb_admin = get_admin_client()
         st.success("Connecté en tant qu'admin")
         if st.button("Se déconnecter"):
             admin_logout()
