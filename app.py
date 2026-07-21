@@ -328,9 +328,7 @@ if not mode_admin:
     else:
         st.markdown(f'<div class="destiny-hero"><h1>{NOM_BOUTIQUE}</h1></div>', unsafe_allow_html=True)
 
-    colonne_produits, colonne_panier = st.columns([3, 1])
-
-    with colonne_produits:
+    with st.container():
         if df_catalogue.empty:
             st.info("Le catalogue est vide pour le moment.")
         else:
@@ -458,7 +456,7 @@ if not mode_admin:
                                     else:
                                         st.error(donnee.get("message", "Erreur lors de l'envoi"))
 
-    with colonne_panier:
+    with st.sidebar:
         st.subheader("🛒 Panier")
         if not st.session_state.cart:
             st.caption("Panier vide")
@@ -504,13 +502,56 @@ if not mode_admin:
                         donnee.get("articles", []), donnee.get("total", 0), donnee.get("introuvables", [])
                     )
                     marquer_panier_converti(client_tel.strip())
+
+                    # 🆕 Bouton WhatsApp -- absent depuis la migration. Le
+                    # client peut prévenir directement la boutique sur
+                    # WhatsApp en plus de la commande déjà enregistrée en
+                    # base, avec le récapitulatif pré-rempli.
+                    if WHATSAPP:
+                        recap = "\n".join(
+                            f"- {a['nom']} x{a['quantite']}" for a in donnee.get("articles", [])
+                        )
+                        message_whatsapp = (
+                            f"Bonjour, je viens de passer la commande {donnee.get('id_commande')} :\n"
+                            f"{recap}\nTotal : {int(donnee.get('total', 0))} FCFA"
+                        )
+                        lien_whatsapp = f"https://wa.me/{WHATSAPP}?text={requests.utils.quote(message_whatsapp)}"
+                        st.link_button("💬 Confirmer aussi sur WhatsApp", lien_whatsapp)
+
                     st.session_state.cart = []
                     st.session_state.dernier_panier_signature = None
                     forcer_rafraichissement()
                     st.success(f"Commande {donnee.get('id_commande')} enregistrée ! Total : {int(donnee.get('total', 0))} FCFA")
                     if donnee.get("ruptures"):
                         st.warning(f"Stock épuisé pour : {', '.join(donnee['ruptures'])}")
-                    st.rerun()
+
+        # 🆕 Suivi de commande -- un client peut retrouver le statut de sa
+        # commande avec son numéro de téléphone, sans avoir besoin de compte.
+        st.divider()
+        with st.expander("📦 Suivre ma commande"):
+            tel_suivi = st.text_input("Numéro utilisé pour la commande", key="tel_suivi")
+            if st.button("Rechercher", key="btn_suivi"):
+                if tel_suivi.strip():
+                    resultat_suivi = (
+                        sb.table("commandes")
+                        .select("id, date, statut, price, articles")
+                        .eq("tel", tel_suivi.strip())
+                        .order("date", desc=True)
+                        .limit(5)
+                        .execute()
+                    )
+                    if not resultat_suivi.data:
+                        st.info("Aucune commande trouvée avec ce numéro.")
+                    for cmd_suivi in resultat_suivi.data:
+                        st.write(
+                            f"**{cmd_suivi.get('id')}** — {cmd_suivi.get('statut')} "
+                            f"— {int(cmd_suivi.get('price') or 0)} FCFA"
+                        )
+
+        if WHATSAPP:
+            st.divider()
+            lien_contact = f"https://wa.me/{WHATSAPP}"
+            st.link_button("💬 Nous contacter sur WhatsApp", lien_contact)
 
 
 # ====================== 8. ADMIN ======================
@@ -552,7 +593,19 @@ else:
                 titre_article = f"{row['nom']} — stock {int(row.get('stock') or 0)}"
                 if id_manquant:
                     titre_article += " ⚠️ id manquant"
-                with st.expander(titre_article):
+
+                # 🆕 Miniature pour identifier l'article visuellement avant
+                # de modifier/supprimer -- fini les listes uniquement en texte.
+                colonne_miniature, colonne_expander = st.columns([1, 6])
+                with colonne_miniature:
+                    image_admin = str(row.get("image") or "")
+                    if re.match(r"^https?://", image_admin.strip(), re.IGNORECASE):
+                        st.image(image_admin, width=70)
+                    else:
+                        st.caption("🚫 pas de photo")
+                with colonne_expander:
+                    expander_article = st.expander(titre_article)
+                with expander_article:
                     if id_manquant:
                         st.warning(
                             "Cet article n'a pas d'identifiant (id) en base -- modification et "
@@ -716,6 +769,9 @@ else:
             with st.form("form_config"):
                 nom_boutique_input = st.text_input("Nom de la boutique", value=config.get("nom_boutique", ""))
                 logo_input = st.text_input("URL du logo", value=config.get("logo", ""))
+                if config.get("logo") and re.match(r"^https?://", str(config.get("logo")).strip(), re.IGNORECASE):
+                    st.caption("Logo actuel :")
+                    st.image(config.get("logo"), width=150)
                 whatsapp_input = st.text_input("Numéro WhatsApp", value=config.get("whatsapp", ""))
                 email_admin_input = st.text_input("Email de notification", value=config.get("email_admin", ""))
                 if st.form_submit_button("Enregistrer"):
