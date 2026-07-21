@@ -10,11 +10,21 @@ import html as html_lib
 import unicodedata
 import base64
 import hashlib
+import hmac
+import secrets
+import logging
 import smtplib
 import requests
+import bcrypt
 from email.mime.text import MIMEText
 from datetime import datetime, timezone
 from supabase import create_client, Client
+
+# 🔒 Logs serveur pour les erreurs techniques -- jamais affichées en clair à
+# l'utilisateur (voir st.error(...) dans tout le fichier : les messages
+# affichés sont désormais génériques, le détail part uniquement ici).
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("destiny_luxury")
 
 # 🔄 Permet à la boutique de se rafraîchir toute seule (nouveaux prix, stock,
 # logo...) sans que le client n'ait besoin d'appuyer sur "actualiser".
@@ -226,30 +236,131 @@ if "admin_connecte" not in st.session_state:
     st.session_state.admin_connecte = False
 
 
+# 🔒 FIX SÉCURITÉ : SHA-256 seul est un hash *rapide*, non conçu pour des
+# mots de passe (pas de sel, cassable très vite par GPU en cas de fuite de
+# la table config). On passe à bcrypt (sel intégré + facteur de coût), avec
+# une compatibilité ascendante qui reconnaît encore un ancien hash SHA-256
+# le temps que l'admin change son mot de passe une première fois.
+#
 # 🔑 Pour définir/réinitialiser le mot de passe admin directement en base
-# (si tu ne connais pas le mot de passe original migré depuis Sheets),
-# lance ceci dans le SQL Editor Supabase en remplaçant la valeur :
-#   update config set valeur = encode(sha256('TonNouveauMotDePasse'::bytea), 'hex')
-#   where cle = 'mot_de_passe';
+# (si tu ne connais pas le mot de passe actuel), lance ce script Python en
+# local puis colle le résultat dans la table config (clé "mot_de_passe") :
+#   import bcrypt; print(bcrypt.hashpw(b"TonNouveauMotDePasse", bcrypt.gensalt(rounds=12)).decode())
 def hash_mot_de_passe(valeur):
-    return hashlib.sha256(str(valeur or "").encode("utf-8")).hexdigest()
+    return bcrypt.hashpw(str(valeur or "").encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+
+
+def _est_hash_sha256_heritage(hash_stocke):
+    # Un hash SHA-256 hexadécimal fait exactement 64 caractères hex, tandis
+    # qu'un hash bcrypt commence toujours par "$2".
+    return bool(re.fullmatch(r"[0-9a-f]{64}", str(hash_stocke or "")))
+
+
+def verifier_mot_de_passe(valeur, hash_stocke):
+    valeur = str(valeur or "")
+    hash_stocke = str(hash_stocke or "")
+    if not hash_stocke:
+        return False
+    if _est_hash_sha256_heritage(hash_stocke):
+        # Compatibilité avec un mot de passe migré avant ce correctif --
+        # comparaison en temps constant pour éviter le timing attack.
+        return hmac.compare_digest(
+            hashlib.sha256(valeur.encode("utf-8")).hexdigest(), hash_stocke
+        )
+    try:
+        return bcrypt.checkpw(valeur.encode("utf-8"), hash_stocke.encode("utf-8"))
+    except ValueError:
+        return False
+
+
+# 🔒 FIX SÉCURITÉ : avant, rien ne limitait le nombre de tentatives de
+# connexion admin -- un mot de passe pouvait être testé en boucle sans
+# aucune limite (brute-force / dictionnaire). On verrouille désormais la
+# session après plusieurs échecs successifs.
+SEUIL_TENTATIVES_ADMIN = 5
+DUREE_VERROU_ADMIN_SEC = 300  # 5 minutes
+DUREE_SESSION_ADMIN_SEC = 1800  # 30 minutes d'inactivité avant déconnexion
 
 
 def admin_login(mot_de_passe):
+    """Retourne (succes: bool, message_erreur: str | None)."""
+    maintenant = datetime.now(timezone.utc).timestamp()
+    verrou_jusqu_a = st.session_state.get("admin_verrou_jusqu_a", 0)
+    if maintenant < verrou_jusqu_a:
+        restant = int(verrou_jusqu_a - maintenant)
+        return False, f"Trop de tentatives échouées. Réessaie dans {restant} seconde(s)."
+
     config_actuelle = charger_config(st.session_state.refresh_token)
     hash_attendu = config_actuelle.get("mot_de_passe", "")
-    if hash_attendu and hash_mot_de_passe(mot_de_passe) == hash_attendu:
+    if verifier_mot_de_passe(mot_de_passe, hash_attendu):
         st.session_state.admin_connecte = True
-        return True
-    return False
+        st.session_state.admin_derniere_activite = maintenant
+        st.session_state.admin_tentatives = 0
+        st.session_state.admin_verrou_jusqu_a = 0
+        return True, None
+
+    tentatives = st.session_state.get("admin_tentatives", 0) + 1
+    st.session_state.admin_tentatives = tentatives
+    if tentatives >= SEUIL_TENTATIVES_ADMIN:
+        st.session_state.admin_verrou_jusqu_a = maintenant + DUREE_VERROU_ADMIN_SEC
+        st.session_state.admin_tentatives = 0
+        return False, f"Trop de tentatives échouées. Réessaie dans {DUREE_VERROU_ADMIN_SEC // 60} minute(s)."
+    return False, "Mot de passe incorrect."
 
 
 def admin_logout():
     st.session_state.admin_connecte = False
+    st.session_state.pop("admin_derniere_activite", None)
+
+
+def session_admin_valide():
+    """Vérifie que l'admin est connecté ET que sa session n'a pas expiré par
+    inactivité (protège un poste laissé déverrouillé)."""
+    if not st.session_state.get("admin_connecte"):
+        return False
+    maintenant = datetime.now(timezone.utc).timestamp()
+    derniere_activite = st.session_state.get("admin_derniere_activite", 0)
+    if maintenant - derniere_activite > DUREE_SESSION_ADMIN_SEC:
+        admin_logout()
+        return False
+    st.session_state.admin_derniere_activite = maintenant
+    return True
+
+
+def throttle(cle, delai_sec=10):
+    """Anti-spam léger pour les actions publiques répétées (avis, alertes
+    stock...) -- limite la fréquence par session, en complément des
+    policies RLS côté Supabase qui restent la protection de fond."""
+    maintenant = datetime.now(timezone.utc).timestamp()
+    dernier = st.session_state.get(f"throttle_{cle}", 0)
+    if maintenant - dernier < delai_sec:
+        return False
+    st.session_state[f"throttle_{cle}"] = maintenant
+    return True
 
 
 # ====================== 3. IMGBB (upload d'images) ======================
 TAILLE_MAX_IMAGE_MO = 32  # limite du compte ImgBB gratuit
+
+# 🔒 FIX SÉCURITÉ : le paramètre `type=[...]` de st.file_uploader ne filtre
+# que l'extension affichée -- un fichier renommé (ex. script déguisé en
+# ".png") passait sans contrôle. On vérifie désormais la signature binaire
+# réelle (magic bytes) du contenu avant tout envoi vers ImgBB.
+SIGNATURES_IMAGE = (
+    (b"\xff\xd8\xff", None),                 # JPEG
+    (b"\x89PNG\r\n\x1a\n", None),            # PNG
+    (b"RIFF", b"WEBP"),                       # WEBP : "RIFF" ....  "WEBP" (offset 8)
+)
+
+
+def est_image_valide(contenu: bytes) -> bool:
+    for signature, marqueur_secondaire in SIGNATURES_IMAGE:
+        if contenu.startswith(signature):
+            if marqueur_secondaire is None:
+                return True
+            if contenu[8:12] == marqueur_secondaire:
+                return True
+    return False
 
 
 def televerser_image_imgbb(fichier):
@@ -263,6 +374,9 @@ def televerser_image_imgbb(fichier):
         contenu = fichier.getvalue()  # ne consomme pas le flux, contrairement à .read()
     except Exception as e:
         return None, f"Impossible de lire le fichier ({e})."
+
+    if not est_image_valide(contenu):
+        return None, "Le fichier ne correspond pas à un format d'image valide (jpg/png/webp)."
 
     taille_mo = len(contenu) / (1024 * 1024)
     if taille_mo > TAILLE_MAX_IMAGE_MO:
@@ -859,7 +973,11 @@ if not mode_admin:
                         with st.expander("🔔 Me prévenir quand disponible"):
                             contact = st.text_input("Email ou téléphone", key=f"alerte_{idx}")
                             if st.button("M'alerter", key=f"btn_alerte_{idx}"):
-                                if contact.strip():
+                                if not contact.strip():
+                                    st.warning("Merci de renseigner un email ou un téléphone.")
+                                elif not throttle(f"alerte_{identifiant_produit}", 15):
+                                    st.warning("Merci de patienter avant de retenter.")
+                                else:
                                     sb.table("alertesstock").insert({
                                         "date_inscription": datetime.now(timezone.utc).isoformat(),
                                         "article": str(row["nom"]),
@@ -912,6 +1030,8 @@ if not mode_admin:
                             if st.form_submit_button("Envoyer mon avis"):
                                 if not nom_avis.strip():
                                     st.warning("Merci de renseigner votre nom.")
+                                elif not throttle(f"avis_{identifiant_produit}", 15):
+                                    st.warning("Merci de patienter avant de renvoyer un avis.")
                                 else:
                                     resultat = sb.rpc("laisser_avis", {
                                         "p_article_id": identifiant_produit,
@@ -1000,25 +1120,59 @@ if not mode_admin:
         # 🆕 Suivi de commande -- un client peut retrouver le statut de sa
         # commande avec son numéro de téléphone, sans avoir besoin de compte.
         st.divider()
+        # 🔒 FIX SÉCURITÉ : avant, n'importe quel visiteur pouvait consulter
+        # les commandes (nom, montant, articles) de n'importe quel numéro de
+        # téléphone deviné ou récupéré ailleurs, sans preuve qu'il lui
+        # appartient (IDOR / énumération). On exige désormais un code de
+        # vérification envoyé sur WhatsApp au numéro concerné avant
+        # d'afficher quoi que ce soit.
         with st.expander("📦 Suivre ma commande"):
-            tel_suivi = st.text_input("Numéro utilisé pour la commande", key="tel_suivi")
-            if st.button("Rechercher", key="btn_suivi"):
-                if tel_suivi.strip():
-                    resultat_suivi = (
-                        sb.table("commandes")
-                        .select("id, date, statut, price, articles")
-                        .eq("tel", tel_suivi.strip())
-                        .order("date", desc=True)
-                        .limit(5)
-                        .execute()
-                    )
-                    if not resultat_suivi.data:
-                        st.info("Aucune commande trouvée avec ce numéro.")
-                    for cmd_suivi in resultat_suivi.data:
-                        st.write(
-                            f"**{cmd_suivi.get('id')}** — {cmd_suivi.get('statut')} "
-                            f"— {int(cmd_suivi.get('price') or 0)} FCFA"
-                        )
+            if not WHATSAPP:
+                st.caption("Le suivi de commande n'est pas disponible pour le moment.")
+            else:
+                tel_suivi = st.text_input("Numéro utilisé pour la commande", key="tel_suivi")
+                if st.button("Recevoir un code de vérification", key="btn_suivi_code"):
+                    tel_normalise = re.sub(r"\D", "", tel_suivi or "")
+                    if not tel_normalise:
+                        st.warning("Merci de saisir un numéro valide.")
+                    elif not throttle(f"otp_suivi_{tel_normalise}", 60):
+                        st.warning("Un code a déjà été demandé récemment pour ce numéro, patiente un peu.")
+                    else:
+                        code = f"{secrets.randbelow(1_000_000):06d}"
+                        st.session_state["otp_suivi"] = {
+                            "tel": tel_normalise, "code": code,
+                            "expire": datetime.now(timezone.utc).timestamp() + 300
+                        }
+                        message_otp = f"Code de vérification pour suivre ta commande : {code} (valable 5 min)."
+                        lien_otp = f"https://wa.me/{tel_normalise}?text={requests.utils.quote(message_otp)}"
+                        st.info("Clique ci-dessous pour recevoir ton code sur WhatsApp, puis reviens le saisir ici.")
+                        st.link_button("💬 Recevoir le code sur WhatsApp", lien_otp)
+
+                otp_en_cours = st.session_state.get("otp_suivi")
+                if otp_en_cours:
+                    code_saisi = st.text_input("Code reçu par WhatsApp", key="code_suivi")
+                    if st.button("Valider et voir mes commandes", key="btn_suivi_valider"):
+                        if datetime.now(timezone.utc).timestamp() > otp_en_cours["expire"]:
+                            st.error("Code expiré, redemande un code.")
+                            st.session_state.pop("otp_suivi", None)
+                        elif not hmac.compare_digest(code_saisi.strip(), otp_en_cours["code"]):
+                            st.error("Code incorrect.")
+                        else:
+                            resultat_suivi = (
+                                sb.table("commandes")
+                                .select("id, date, statut, price, articles")
+                                .eq("tel", otp_en_cours["tel"])
+                                .order("date", desc=True)
+                                .limit(5)
+                                .execute()
+                            )
+                            if not resultat_suivi.data:
+                                st.info("Aucune commande trouvée avec ce numéro.")
+                            for cmd_suivi in resultat_suivi.data:
+                                st.write(
+                                    f"**{cmd_suivi.get('id')}** — {cmd_suivi.get('statut')} "
+                                    f"— {int(cmd_suivi.get('price') or 0)} FCFA"
+                                )
 
         if WHATSAPP:
             st.divider()
@@ -1050,16 +1204,22 @@ else:
             with col_connexion:
                 if st.button("Se connecter"):
                     try:
-                        if admin_login(mdp_admin):
+                        ok, message_erreur = admin_login(mdp_admin)
+                        if ok:
                             st.rerun()
                         else:
-                            st.error("Mot de passe incorrect.")
-                    except Exception as e:
-                        st.error(f"Échec de connexion : {e}")
+                            st.error(message_erreur)
+                    except Exception:
+                        logger.exception("Échec de connexion admin")
+                        st.error("Échec de connexion. Réessaie dans quelques instants.")
             with col_retour:
                 if st.button("↩️ Retour"):
                     st.session_state.acces_choisi = None
                     st.rerun()
+    elif not session_admin_valide():
+        st.warning("Session admin expirée par inactivité. Merci de te reconnecter.")
+        st.session_state.acces_choisi = None
+        st.rerun()
     else:
         sb_admin = get_admin_client()
         st.success("Connecté en tant qu'admin")
@@ -1499,8 +1659,9 @@ else:
                             ("logo", logo_valeur),
                         ]:
                             sb_admin.table("config").upsert({"cle": cle, "valeur": valeur}).execute()
-                    except Exception as e:
-                        st.error(f"❌ L'enregistrement en base a échoué : {e}")
+                    except Exception:
+                        logger.exception("Échec enregistrement identité boutique")
+                        st.error("❌ L'enregistrement en base a échoué. Réessaie dans un instant.")
                     else:
                         forcer_rafraichissement()
                         if echec_logo:
@@ -1541,8 +1702,9 @@ else:
                             ("heure_bilan", str(int(heure_bilan_input)))
                         ]:
                             sb_admin.table("config").upsert({"cle": cle, "valeur": valeur}).execute()
-                    except Exception as e:
-                        st.error(f"❌ L'enregistrement en base a échoué : {e}")
+                    except Exception:
+                        logger.exception("Échec enregistrement config contact/alertes")
+                        st.error("❌ L'enregistrement en base a échoué. Réessaie dans un instant.")
                     else:
                         forcer_rafraichissement()
                         st.success("Configuration mise à jour")
@@ -1556,7 +1718,7 @@ else:
                 mdp_nouveau_confirmation = st.text_input("Confirmer le nouveau mot de passe", type="password")
                 if st.form_submit_button("Changer le mot de passe"):
                     hash_attendu = config.get("mot_de_passe", "")
-                    if not hash_attendu or hash_mot_de_passe(mdp_actuel) != hash_attendu:
+                    if not verifier_mot_de_passe(mdp_actuel, hash_attendu):
                         st.error("Mot de passe actuel incorrect.")
                     elif not mdp_nouveau.strip():
                         st.warning("Le nouveau mot de passe ne peut pas être vide.")
