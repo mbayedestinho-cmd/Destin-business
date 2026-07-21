@@ -884,8 +884,10 @@ def notifier_retour_stock(nom_article):
     nom_boutique_actuel = charger_config(MARCHAND_ID, st.session_state.refresh_token).get("nom_boutique", "notre boutique")
     for alerte in (reponse.data or []):
         if alerte.get("contact_type") == "email":
+            nom_client_alerte = (alerte.get("nom_client") or "").strip()
+            salutation = f"Bonjour {nom_client_alerte}," if nom_client_alerte else "Bonjour,"
             corps = (
-                f"Bonne nouvelle ! L'article \"{nom_article}\" est de nouveau disponible "
+                f"{salutation}\n\nBonne nouvelle ! L'article \"{nom_article}\" est de nouveau disponible "
                 f"sur {nom_boutique_actuel}.\n\nVenez vite avant la prochaine rupture de stock !"
             )
             if envoyer_email_brut(alerte["contact"], f"{nom_article} est de retour en stock !", corps):
@@ -1076,10 +1078,11 @@ if not mode_admin:
                     if en_rupture:
                         st.error("Rupture de stock")
                         with st.expander("🔔 Me prévenir quand disponible"):
+                            nom_alerte = st.text_input("Votre nom", key=f"alerte_nom_{idx}")
                             contact = st.text_input("Email ou téléphone", key=f"alerte_{idx}")
                             if st.button("M'alerter", key=f"btn_alerte_{idx}"):
-                                if not contact.strip():
-                                    st.warning("Merci de renseigner un email ou un téléphone.")
+                                if not nom_alerte.strip() or not contact.strip():
+                                    st.warning("Merci de renseigner votre nom et un email ou un téléphone.")
                                 elif not throttle(f"alerte_{identifiant_produit}", 15):
                                     st.warning("Merci de patienter avant de retenter.")
                                 else:
@@ -1091,6 +1094,7 @@ if not mode_admin:
                                     # que fournis tels quels par le client.
                                     try:
                                         sb.rpc("creer_alerte_stock", {
+                                            "p_nom": nom_alerte.strip(),
                                             "p_article": str(row["nom"]),
                                             "p_contact_type": "email" if "@" in contact else "telephone",
                                             "p_contact": contact.strip(),
@@ -1879,21 +1883,23 @@ else:
                     alertes_article = [a for a in alertes_en_attente if a["article"] == article_nom]
                     with st.expander(f"{article_nom} — {len(alertes_article)} inscrit(s)"):
                         for alerte in alertes_article:
+                            nom_client_alerte = (alerte.get("nom_client") or "").strip()
                             if alerte.get("contact_type") == "telephone":
                                 tel_alerte = re.sub(r"\D", "", str(alerte.get("contact") or ""))
+                                salutation = f"Bonjour {nom_client_alerte}," if nom_client_alerte else "Bonjour,"
                                 message_alerte = (
-                                    f"Bonjour, l'article \"{article_nom}\" est de nouveau disponible "
+                                    f"{salutation} l'article \"{article_nom}\" est de nouveau disponible "
                                     f"sur {config.get('nom_boutique', 'notre boutique')} !"
                                 )
                                 lien_whatsapp_alerte = f"https://wa.me/{tel_alerte}?text={requests.utils.quote(message_alerte)}"
                                 col1, col2 = st.columns([3, 2])
-                                col1.write(f"📞 {alerte.get('contact')}")
+                                col1.write(f"📞 {nom_client_alerte or 'Client'} — {alerte.get('contact')}")
                                 col2.link_button(
                                     "💬 WhatsApp", lien_whatsapp_alerte,
                                     key=f"wa_alerte_{alerte.get('id')}"
                                 )
                             else:
-                                st.write(f"✉️ {alerte.get('contact')}")
+                                st.write(f"✉️ {nom_client_alerte or 'Client'} — {alerte.get('contact')}")
                         if st.button("🔔 Notifier les inscrits par email maintenant", key=f"notif_{article_nom}"):
                             notifier_retour_stock(article_nom)
                             st.success("Emails envoyés aux inscrits par email pour cet article.")
