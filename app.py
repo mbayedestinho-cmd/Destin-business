@@ -64,10 +64,85 @@ st.markdown("""
     /* Prix et titres produits */
     div[data-testid="stMarkdownContainer"] strong { color: #eae4d8; }
 
-    /* Bandeau logo */
-    .destiny-hero { text-align:center; padding: 2rem 0 1rem 0; }
-    .destiny-hero h1 { font-size: 2.4rem; color: #eae4d8; margin-top: 0.8rem; }
-    .destiny-hero img { border-radius: 16px; box-shadow: 0 8px 30px rgba(201,163,92,0.15); }
+    /* Bandeau logo -- effet "bling" premium plein écran */
+    .destiny-hero {
+        position: relative;
+        left: 50%;
+        right: 50%;
+        margin-left: -50vw;
+        margin-right: -50vw;
+        width: 100vw;
+        text-align: center;
+        padding: 3.5rem 1rem 2.5rem 1rem;
+        margin-top: -1rem;
+        margin-bottom: 1.5rem;
+        overflow: hidden;
+        background:
+            radial-gradient(ellipse at center, rgba(201,163,92,0.22) 0%, rgba(13,13,15,0) 68%),
+            linear-gradient(180deg, #1b1810 0%, #0d0d0f 100%);
+        border-bottom: 1px solid rgba(201,163,92,0.35);
+    }
+    .destiny-hero::before {
+        content: "";
+        position: absolute;
+        top: 50%; left: 50%;
+        width: 160%; height: 420px;
+        transform: translate(-50%, -50%);
+        background: conic-gradient(from 0deg, transparent, rgba(201,163,92,0.28), transparent 28%);
+        animation: destiny-rotation 9s linear infinite;
+        pointer-events: none;
+    }
+    @keyframes destiny-rotation { to { transform: translate(-50%, -50%) rotate(360deg); } }
+
+    .destiny-hero-logo-wrap {
+        position: relative;
+        display: inline-block;
+        z-index: 1;
+        border-radius: 18px;
+        overflow: hidden;
+    }
+    .destiny-hero img {
+        max-height: 240px;
+        max-width: min(90vw, 480px);
+        display: block;
+        border-radius: 18px;
+        position: relative;
+        animation: destiny-glow 3s ease-in-out infinite alternate;
+    }
+    @keyframes destiny-glow {
+        from { box-shadow: 0 0 20px rgba(201,163,92,0.35), 0 0 45px rgba(201,163,92,0.18), 0 10px 40px rgba(0,0,0,0.55); }
+        to   { box-shadow: 0 0 38px rgba(201,163,92,0.7), 0 0 85px rgba(201,163,92,0.38), 0 10px 40px rgba(0,0,0,0.55); }
+    }
+    .destiny-hero-shine {
+        position: absolute;
+        top: 0; left: -60%;
+        width: 35%; height: 100%;
+        background: linear-gradient(115deg, transparent, rgba(255,255,255,0.55), transparent);
+        transform: skewX(-20deg);
+        animation: destiny-shine 3.2s ease-in-out infinite;
+        z-index: 2;
+    }
+    @keyframes destiny-shine {
+        0%   { left: -60%; }
+        45%  { left: 130%; }
+        100% { left: 130%; }
+    }
+    .destiny-hero h1 {
+        font-size: 2.6rem;
+        color: #f4ecdc;
+        margin-top: 1.1rem;
+        letter-spacing: 1px;
+        text-shadow: 0 0 20px rgba(201,163,92,0.55);
+        position: relative; z-index: 1;
+    }
+    .destiny-hero .destiny-tagline {
+        color: #c9a35c;
+        letter-spacing: 4px;
+        text-transform: uppercase;
+        font-size: 0.78rem;
+        margin-top: 0.5rem;
+        position: relative; z-index: 1;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -139,21 +214,47 @@ def admin_logout():
 
 
 # ====================== 3. IMGBB (upload d'images) ======================
+TAILLE_MAX_IMAGE_MO = 32  # limite du compte ImgBB gratuit
+
+
 def televerser_image_imgbb(fichier):
-    """Envoie un fichier uploadé vers ImgBB, renvoie l'URL hébergée ou None."""
+    """Envoie un fichier uploadé vers ImgBB.
+    Renvoie un tuple (url, erreur) : url vaut None en cas d'échec, et erreur
+    contient alors un message explicite (au lieu d'échouer silencieusement)."""
+    if fichier is None:
+        return None, None
+
     try:
-        image_b64 = base64.b64encode(fichier.read()).decode()
+        contenu = fichier.getvalue()  # ne consomme pas le flux, contrairement à .read()
+    except Exception as e:
+        return None, f"Impossible de lire le fichier ({e})."
+
+    taille_mo = len(contenu) / (1024 * 1024)
+    if taille_mo > TAILLE_MAX_IMAGE_MO:
+        return None, f"Fichier trop volumineux ({taille_mo:.1f} Mo, max {TAILLE_MAX_IMAGE_MO} Mo)."
+
+    try:
+        image_b64 = base64.b64encode(contenu).decode()
         reponse = requests.post(
             "https://api.imgbb.com/1/upload",
             data={"key": st.secrets["IMGBB_API_KEY"], "image": image_b64},
-            timeout=30
+            timeout=60
         )
+    except requests.exceptions.Timeout:
+        return None, "Délai d'attente dépassé (connexion trop lente ou fichier trop lourd)."
+    except requests.exceptions.RequestException as e:
+        return None, f"Erreur réseau lors de l'envoi vers ImgBB : {e}"
+
+    try:
         donnees = reponse.json()
-        if donnees.get("success"):
-            return donnees["data"]["url"]
     except Exception:
-        pass
-    return None
+        return None, f"Réponse invalide d'ImgBB (code HTTP {reponse.status_code})."
+
+    if donnees.get("success"):
+        return donnees["data"]["url"], None
+
+    message_erreur = (donnees.get("error") or {}).get("message", "erreur inconnue")
+    return None, f"ImgBB a refusé l'image : {message_erreur} (code HTTP {reponse.status_code})."
 
 
 # ====================== 3bis. GALERIE PHOTOS AVEC GLISSEMENT (SWIPE) ======================
@@ -520,12 +621,22 @@ mode_admin = st.query_params.get("admin") == "1"
 if not mode_admin:
     if LOGO_SUR:
         st.markdown(
-            f'<div class="destiny-hero"><img src="{html_lib.escape(LOGO_SUR, quote=True)}" '
-            f'style="max-height:200px;"><h1>{NOM_BOUTIQUE}</h1></div>',
+            f'<div class="destiny-hero">'
+            f'<div class="destiny-hero-logo-wrap">'
+            f'<img src="{html_lib.escape(LOGO_SUR, quote=True)}">'
+            f'<div class="destiny-hero-shine"></div>'
+            f'</div>'
+            f'<h1>{NOM_BOUTIQUE}</h1>'
+            f'<div class="destiny-tagline">Élégance • Exclusivité • Luxe</div>'
+            f'</div>',
             unsafe_allow_html=True
         )
     else:
-        st.markdown(f'<div class="destiny-hero"><h1>{NOM_BOUTIQUE}</h1></div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="destiny-hero"><h1>{NOM_BOUTIQUE}</h1>'
+            f'<div class="destiny-tagline">Élégance • Exclusivité • Luxe</div></div>',
+            unsafe_allow_html=True
+        )
 
     with st.container():
         if df_catalogue.empty:
@@ -826,17 +937,19 @@ else:
                                 "couleurs": nouvelles_couleurs
                             }
                             if nouvelle_image_fichier is not None:
-                                url = televerser_image_imgbb(nouvelle_image_fichier)
+                                url, erreur_upload = televerser_image_imgbb(nouvelle_image_fichier)
                                 if url:
                                     maj["image"] = url
                                 else:
-                                    st.warning("Échec de l'envoi de l'image principale vers ImgBB — le reste a été enregistré.")
+                                    st.warning(f"Échec de l'envoi de l'image principale : {erreur_upload or 'raison inconnue'} — le reste a été enregistré.")
                             if nouvelles_images_supp:
                                 urls_existantes = [u.strip() for u in str(row.get("images_supplementaires") or "").split(",") if u.strip()]
                                 for f in nouvelles_images_supp:
-                                    url = televerser_image_imgbb(f)
+                                    url, erreur_upload = televerser_image_imgbb(f)
                                     if url:
                                         urls_existantes.append(url)
+                                    elif erreur_upload:
+                                        st.warning(f"Image supplémentaire ignorée : {erreur_upload}")
                                 maj["images_supplementaires"] = ", ".join(urls_existantes)
                             sb_admin.table("catalogue").update(maj).eq("id", row["id"]).execute()
                             ancien_stock = int(row.get("stock") or 0)
@@ -867,12 +980,18 @@ else:
                     if not nom.strip():
                         st.warning("Le nom de l'article est requis.")
                     else:
-                        url_principale = televerser_image_imgbb(image_fichier) if image_fichier else ""
+                        url_principale = ""
+                        if image_fichier:
+                            url_principale, erreur_upload = televerser_image_imgbb(image_fichier)
+                            if erreur_upload:
+                                st.warning(f"Image principale non enregistrée : {erreur_upload}")
                         urls_supp = []
                         for f in (images_supp_fichiers or []):
-                            url = televerser_image_imgbb(f)
+                            url, erreur_upload = televerser_image_imgbb(f)
                             if url:
                                 urls_supp.append(url)
+                            elif erreur_upload:
+                                st.warning(f"Image supplémentaire ignorée : {erreur_upload}")
                         sb_admin.table("catalogue").insert({
                             "id": str(uuid.uuid4()),
                             "nom": nom, "prix": int(prix), "stock": stock,
@@ -1085,11 +1204,11 @@ else:
                 if st.form_submit_button("Enregistrer"):
                     logo_valeur = config.get("logo", "")
                     if nouveau_logo_fichier is not None:
-                        url_logo = televerser_image_imgbb(nouveau_logo_fichier)
+                        url_logo, erreur_upload = televerser_image_imgbb(nouveau_logo_fichier)
                         if url_logo:
                             logo_valeur = url_logo
                         else:
-                            st.warning("Échec de l'envoi du logo vers ImgBB — l'ancien logo a été conservé.")
+                            st.error(f"Échec de l'envoi du logo : {erreur_upload or 'raison inconnue'} — l'ancien logo a été conservé.")
                     for cle, valeur in [
                         ("nom_boutique", nom_boutique_input), ("logo", logo_valeur),
                         ("whatsapp", whatsapp_input), ("email_admin", email_admin_input),
@@ -1100,6 +1219,29 @@ else:
                     forcer_rafraichissement()
                     st.success("Configuration mise à jour")
                     st.rerun()
+
+            st.divider()
+            st.write("### 🔐 Changer le mot de passe admin")
+            with st.form("form_changer_mdp", clear_on_submit=True):
+                mdp_actuel = st.text_input("Mot de passe actuel", type="password")
+                mdp_nouveau = st.text_input("Nouveau mot de passe", type="password")
+                mdp_nouveau_confirmation = st.text_input("Confirmer le nouveau mot de passe", type="password")
+                if st.form_submit_button("Changer le mot de passe"):
+                    hash_attendu = config.get("mot_de_passe", "")
+                    if not hash_attendu or hash_mot_de_passe(mdp_actuel) != hash_attendu:
+                        st.error("Mot de passe actuel incorrect.")
+                    elif not mdp_nouveau.strip():
+                        st.warning("Le nouveau mot de passe ne peut pas être vide.")
+                    elif len(mdp_nouveau) < 6:
+                        st.warning("Le nouveau mot de passe doit contenir au moins 6 caractères.")
+                    elif mdp_nouveau != mdp_nouveau_confirmation:
+                        st.warning("La confirmation ne correspond pas au nouveau mot de passe.")
+                    else:
+                        sb_admin.table("config").upsert(
+                            {"cle": "mot_de_passe", "valeur": hash_mot_de_passe(mdp_nouveau)}
+                        ).execute()
+                        forcer_rafraichissement()
+                        st.success("Mot de passe mis à jour avec succès — utilise-le dès ta prochaine connexion.")
 
         with tab_alertes:
             reponse = sb_admin.table("alertesstock").select("*").eq("statut", "en_attente").execute()
