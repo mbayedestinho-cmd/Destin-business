@@ -1,5 +1,8 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
 import uuid
 import re
 import html as html_lib
@@ -153,6 +156,75 @@ def televerser_image_imgbb(fichier):
     return None
 
 
+# ====================== 3bis. GALERIE PHOTOS AVEC GLISSEMENT (SWIPE) ======================
+def afficher_galerie_swipe(images, hauteur=280, cle=""):
+    """Affiche une galerie photo qu'on peut faire glisser au doigt (mobile) ou
+    à la souris pour passer d'une image à l'autre, avec des points cliquables
+    en complément sur ordinateur."""
+    images = [u for u in images if u]
+    if not images:
+        return
+    if len(images) == 1:
+        st.image(images[0], use_container_width=True)
+        return
+
+    diapositives = "".join(
+        f'<div class="dlc-slide"><img src="{html_lib.escape(u, quote=True)}" loading="lazy"></div>'
+        for u in images
+    )
+    points = "".join(f'<span class="dlc-dot" data-i="{i}"></span>' for i in range(len(images)))
+    id_composant = f"dlc-galerie-{re.sub(r'[^a-zA-Z0-9_-]', '', str(cle))}"
+
+    code_html = f"""
+    <div id="{id_composant}" class="dlc-galerie">
+      <div class="dlc-piste">{diapositives}</div>
+      <div class="dlc-dots">{points}</div>
+    </div>
+    <style>
+      #{id_composant} {{ position:relative; width:100%; font-family:'Inter',sans-serif; }}
+      #{id_composant} .dlc-piste {{
+        display:flex; overflow-x:auto; scroll-snap-type:x mandatory;
+        -webkit-overflow-scrolling:touch; border-radius:12px; scrollbar-width:none;
+      }}
+      #{id_composant} .dlc-piste::-webkit-scrollbar {{ display:none; }}
+      #{id_composant} .dlc-slide {{
+        flex:0 0 100%; scroll-snap-align:center; display:flex;
+        align-items:center; justify-content:center; background:#0d0d0f;
+      }}
+      #{id_composant} .dlc-slide img {{
+        width:100%; height:{hauteur}px; object-fit:cover; border-radius:12px; display:block;
+      }}
+      #{id_composant} .dlc-dots {{ display:flex; justify-content:center; gap:6px; margin-top:6px; }}
+      #{id_composant} .dlc-dot {{
+        width:6px; height:6px; border-radius:50%; background:#5a5a5f;
+        transition:background .2s; cursor:pointer;
+      }}
+      #{id_composant} .dlc-dot.actif {{ background:#c9a35c; }}
+    </style>
+    <script>
+      (function() {{
+        const conteneur = document.getElementById("{id_composant}");
+        const piste = conteneur.querySelector(".dlc-piste");
+        const pts = conteneur.querySelectorAll(".dlc-dot");
+        function majPoints() {{
+          const i = Math.round(piste.scrollLeft / piste.clientWidth);
+          pts.forEach((p, idx) => p.classList.toggle("actif", idx === i));
+        }}
+        piste.addEventListener("scroll", () => {{
+          window.clearTimeout(piste._t);
+          piste._t = window.setTimeout(majPoints, 60);
+        }});
+        pts.forEach(p => p.addEventListener("click", () => {{
+          const i = parseInt(p.dataset.i, 10);
+          piste.scrollTo({{ left: i * piste.clientWidth, behavior: "smooth" }});
+        }}));
+        majPoints();
+      }})();
+    </script>
+    """
+    components.html(code_html, height=hauteur + 26, scrolling=False)
+
+
 # ====================== 4. DONNÉES (mise en cache + TTL) ======================
 @st.cache_data(ttl=60)
 def charger_catalogue(_refresh=0):
@@ -302,10 +374,137 @@ def envoyer_notification_commande(id_commande, client_nom, tel, articles, total,
     return envoye
 
 
+def envoyer_email_brut(destinataire, sujet, corps):
+    """Envoie un email brut via Gmail SMTP. Renvoie True/False, ne lève jamais."""
+    if not EMAIL_ACTIVE or not destinataire:
+        return False
+    try:
+        msg = MIMEText(corps, "plain", "utf-8")
+        msg["Subject"] = sujet
+        msg["From"] = st.secrets["GMAIL_ADDRESS"]
+        msg["To"] = destinataire
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as serveur:
+            serveur.login(st.secrets["GMAIL_ADDRESS"], st.secrets["GMAIL_APP_PASSWORD"])
+            serveur.send_message(msg)
+        return True
+    except Exception:
+        return False
+
+
+# ====================== 6bis. ALERTES AUTOMATIQUES ======================
+# 🔔 Ces 3 fonctions utilisent le client admin (clé secrète, bypass RLS) car
+# elles tournent en tâche de fond, quel que soit le visiteur qui a chargé la
+# page -- ce ne sont pas des actions initiées par un client de la boutique.
+def notifier_retour_stock(nom_article):
+    """Prévient automatiquement par email les personnes inscrites à l'alerte
+    de retour en stock pour cet article. Les contacts par téléphone restent
+    visibles dans l'onglet Admin > Alertes stock pour une relance WhatsApp
+    manuelle (pas d'API WhatsApp disponible pour un envoi 100% automatique)."""
+    try:
+        sb_bg = get_admin_client()
+        reponse = sb_bg.table("alertesstock").select("*").eq("article", nom_article).eq("statut", "en_attente").execute()
+    except Exception:
+        return
+    nom_boutique_actuel = charger_config(st.session_state.refresh_token).get("nom_boutique", "notre boutique")
+    for alerte in (reponse.data or []):
+        if alerte.get("contact_type") == "email":
+            corps = (
+                f"Bonne nouvelle ! L'article \"{nom_article}\" est de nouveau disponible "
+                f"sur {nom_boutique_actuel}.\n\nVenez vite avant la prochaine rupture de stock !"
+            )
+            if envoyer_email_brut(alerte["contact"], f"{nom_article} est de retour en stock !", corps):
+                try:
+                    sb_bg.table("alertesstock").update({"statut": "notifie"}).eq("id", alerte["id"]).execute()
+                except Exception:
+                    pass
+
+
+def verifier_alerte_stock_bas(df_catalogue, config):
+    """Envoie un email à l'admin (une seule fois par jour) listant les
+    articles dont le stock est descendu sous le seuil défini dans Config."""
+    if not EMAIL_ACTIVE or df_catalogue.empty:
+        return
+    try:
+        seuil = int(config.get("seuil_stock_bas", 3) or 3)
+    except (TypeError, ValueError):
+        seuil = 3
+    aujourdhui = datetime.now(timezone.utc).date().isoformat()
+    if config.get("derniere_alerte_stock_date") == aujourdhui:
+        return  # déjà envoyée aujourd'hui
+
+    articles_bas = df_catalogue[df_catalogue["stock"] <= seuil]
+    if articles_bas.empty:
+        return
+
+    destinataire = config.get("email_admin") or st.secrets.get("GMAIL_ADDRESS", "")
+    corps = f"Seuil d'alerte configuré : {seuil} unité(s) ou moins.\n\nArticles concernés :\n"
+    for _, ligne in articles_bas.iterrows():
+        corps += f"- {ligne['nom']} : {int(ligne['stock'])} en stock\n"
+
+    if envoyer_email_brut(destinataire, "⚠️ Alerte stock bas", corps):
+        try:
+            get_admin_client().table("config").upsert(
+                {"cle": "derniere_alerte_stock_date", "valeur": aujourdhui}
+            ).execute()
+        except Exception:
+            pass
+
+
+def verifier_bilan_quotidien(config):
+    """Envoie un récapitulatif quotidien des ventes à l'heure configurée dans
+    Config (une seule fois par jour, déclenché à la première visite de l'app
+    après l'heure fixée -- il n'y a pas de tâche planifiée côté serveur)."""
+    if not EMAIL_ACTIVE:
+        return
+    try:
+        heure_cible = int(config.get("heure_bilan", 20) or 20)
+    except (TypeError, ValueError):
+        heure_cible = 20
+    maintenant = datetime.now(timezone.utc)
+    aujourdhui = maintenant.date().isoformat()
+    if maintenant.hour < heure_cible:
+        return
+    if config.get("dernier_bilan_date") == aujourdhui:
+        return  # déjà envoyé aujourd'hui
+
+    try:
+        debut_jour = maintenant.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        sb_bg = get_admin_client()
+        reponse = sb_bg.table("commandes").select("*").gte("date", debut_jour).execute()
+    except Exception:
+        return
+
+    commandes_jour = reponse.data or []
+    total_ventes = sum(float(c.get("price") or 0) for c in commandes_jour)
+    nb_commandes = len(commandes_jour)
+    corps = (
+        f"Bilan des ventes du {aujourdhui} :\n\n"
+        f"Nombre de commandes : {nb_commandes}\n"
+        f"Chiffre d'affaires total : {int(total_ventes)} FCFA\n"
+    )
+    destinataire = config.get("email_admin") or st.secrets.get("GMAIL_ADDRESS", "")
+    if envoyer_email_brut(destinataire, f"📊 Bilan des ventes — {aujourdhui}", corps):
+        try:
+            get_admin_client().table("config").upsert(
+                {"cle": "dernier_bilan_date", "valeur": aujourdhui}
+            ).execute()
+        except Exception:
+            pass
+
+
 # ====================== 7. INTERFACE PUBLIQUE ======================
 config = charger_config(st.session_state.refresh_token)
 df_catalogue = charger_catalogue(st.session_state.refresh_token)
 avis_moyennes = charger_avis_moyennes(st.session_state.refresh_token)
+
+# 🔔 Vérifications silencieuses (n'affichent rien, ne bloquent jamais la
+# page) -- envoient au plus un email par jour chacune, dès que quelqu'un
+# charge l'app après les conditions requises.
+try:
+    verifier_alerte_stock_bas(df_catalogue, config)
+    verifier_bilan_quotidien(config)
+except Exception:
+    pass
 
 NOM_BOUTIQUE = html_lib.escape(config.get("nom_boutique", "Destiny Luxury Collection"))
 LOGO_URL = config.get("logo", "")
@@ -357,15 +556,7 @@ if not mode_admin:
                                       if re.match(r"^https?://", u.strip(), re.IGNORECASE)]
 
                     if toutes_images:
-                        if len(toutes_images) > 1:
-                            choix_photo = st.selectbox(
-                                "Photo", options=list(range(len(toutes_images))),
-                                format_func=lambda i: f"Photo {i + 1}",
-                                key=f"galerie_{idx}", label_visibility="collapsed"
-                            )
-                        else:
-                            choix_photo = 0
-                        st.image(toutes_images[choix_photo], use_container_width=True)
+                        afficher_galerie_swipe(toutes_images, hauteur=280, cle=f"prod_{idx}")
 
                     st.markdown(f"**{nom_affiche}**")
 
@@ -574,9 +765,9 @@ else:
             admin_logout()
             st.rerun()
 
-        (tab_catalogue, tab_promos, tab_commandes, tab_avis,
+        (tab_catalogue, tab_promos, tab_commandes, tab_avis, tab_stats,
          tab_config, tab_alertes, tab_paniers) = st.tabs(
-            ["📦 Catalogue", "🏷️ Promotions", "🧾 Commandes", "💬 Avis",
+            ["📦 Catalogue", "🏷️ Promotions", "🧾 Commandes", "💬 Avis", "📊 Statistiques",
              "⚙️ Config", "🔔 Alertes stock", "🛒 Paniers abandonnés"]
         )
 
@@ -648,6 +839,9 @@ else:
                                         urls_existantes.append(url)
                                 maj["images_supplementaires"] = ", ".join(urls_existantes)
                             sb_admin.table("catalogue").update(maj).eq("id", row["id"]).execute()
+                            ancien_stock = int(row.get("stock") or 0)
+                            if ancien_stock <= 0 and nouveau_stock > 0:
+                                notifier_retour_stock(nouveau_nom)
                             forcer_rafraichissement()
                             st.success("Article mis à jour")
                             st.rerun()
@@ -765,19 +959,142 @@ else:
                         forcer_rafraichissement()
                         st.rerun()
 
+        with tab_stats:
+            st.write("### 📊 Statistiques avancées")
+            reponse_stats = sb_admin.table("commandes").select("*").order("date", desc=False).execute()
+            commandes_stats = reponse_stats.data or []
+
+            THEME_GRAPHIQUE = dict(
+                template="plotly_dark", paper_bgcolor="#16151a", plot_bgcolor="#16151a",
+                font=dict(family="Inter, sans-serif", color="#eae4d8"),
+                margin=dict(l=10, r=10, t=50, b=10)
+            )
+
+            if not commandes_stats:
+                st.caption("Pas encore assez de données pour générer des statistiques.")
+            else:
+                df_cmd = pd.DataFrame(commandes_stats)
+                df_cmd["date_parsed"] = pd.to_datetime(df_cmd["date"], errors="coerce", utc=True)
+                df_cmd["price"] = pd.to_numeric(df_cmd["price"], errors="coerce").fillna(0)
+                df_cmd["jour"] = df_cmd["date_parsed"].dt.date
+
+                col_m1, col_m2, col_m3 = st.columns(3)
+                col_m1.metric("Chiffre d'affaires total", f"{int(df_cmd['price'].sum())} FCFA")
+                col_m2.metric("Nombre de commandes", len(df_cmd))
+                col_m3.metric(
+                    "Panier moyen",
+                    f"{int(df_cmd['price'].mean()) if len(df_cmd) else 0} FCFA"
+                )
+
+                # --- Chiffre d'affaires quotidien ---
+                ca_par_jour = df_cmd.groupby("jour")["price"].sum().reset_index()
+                fig_ca = go.Figure()
+                fig_ca.add_trace(go.Scatter(
+                    x=ca_par_jour["jour"], y=ca_par_jour["price"],
+                    mode="lines+markers", line=dict(color="#c9a35c", width=3, shape="spline"),
+                    marker=dict(size=6, color="#eae4d8"),
+                    fill="tozeroy", fillcolor="rgba(201,163,92,0.15)"
+                ))
+                fig_ca.update_layout(title="Chiffre d'affaires quotidien (FCFA)", height=320, **THEME_GRAPHIQUE)
+                st.plotly_chart(fig_ca, use_container_width=True)
+
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    par_statut = df_cmd["statut"].fillna("En cours").value_counts().reset_index()
+                    par_statut.columns = ["statut", "nombre"]
+                    fig_statut = px.pie(
+                        par_statut, names="statut", values="nombre", hole=0.55,
+                        color_discrete_sequence=["#c9a35c", "#8a7350", "#eae4d8", "#5a4a2f"]
+                    )
+                    fig_statut.update_layout(title="Commandes par statut", height=320, **THEME_GRAPHIQUE)
+                    st.plotly_chart(fig_statut, use_container_width=True)
+
+                with col_b:
+                    compteur_articles = {}
+                    for liste in df_cmd["articles"].dropna():
+                        if isinstance(liste, list):
+                            for art in liste:
+                                nom_art = art.get("nom", "?")
+                                qte = art.get("quantite", 0) or 0
+                                compteur_articles[nom_art] = compteur_articles.get(nom_art, 0) + qte
+                    if compteur_articles:
+                        df_top = pd.DataFrame(
+                            sorted(compteur_articles.items(), key=lambda x: x[1], reverse=True)[:10],
+                            columns=["article", "quantite"]
+                        ).sort_values("quantite")
+                        fig_top = px.bar(df_top, x="quantite", y="article", orientation="h")
+                        fig_top.update_traces(marker_color="#c9a35c")
+                        fig_top.update_layout(title="Top 10 des articles les plus vendus", height=320, **THEME_GRAPHIQUE)
+                        st.plotly_chart(fig_top, use_container_width=True)
+                    else:
+                        st.caption("Pas encore de détail d'articles vendus.")
+
+                if not df_catalogue.empty:
+                    try:
+                        seuil_actuel = int(config.get("seuil_stock_bas", 3) or 3)
+                    except (TypeError, ValueError):
+                        seuil_actuel = 3
+                    df_stock = df_catalogue[["nom", "stock"]].sort_values("stock")
+                    couleurs_stock = [
+                        "#e35d5d" if s <= seuil_actuel else "#c9a35c" for s in df_stock["stock"]
+                    ]
+                    fig_stock = go.Figure(go.Bar(
+                        x=df_stock["stock"], y=df_stock["nom"], orientation="h",
+                        marker_color=couleurs_stock
+                    ))
+                    fig_stock.update_layout(
+                        title=f"Niveau de stock par article (rouge = seuil bas ≤ {seuil_actuel})",
+                        height=max(320, 26 * len(df_stock)), **THEME_GRAPHIQUE
+                    )
+                    st.plotly_chart(fig_stock, use_container_width=True)
+
         with tab_config:
             with st.form("form_config"):
                 nom_boutique_input = st.text_input("Nom de la boutique", value=config.get("nom_boutique", ""))
-                logo_input = st.text_input("URL du logo", value=config.get("logo", ""))
+
+                st.write("**Logo de la boutique**")
                 if config.get("logo") and re.match(r"^https?://", str(config.get("logo")).strip(), re.IGNORECASE):
-                    st.caption("Logo actuel :")
-                    st.image(config.get("logo"), width=150)
+                    st.image(config.get("logo"), width=150, caption="Logo actuel")
+                else:
+                    st.caption("Aucun logo pour le moment.")
+                nouveau_logo_fichier = st.file_uploader(
+                    "Choisir un logo (remplace l'actuel)", type=["jpg", "jpeg", "png", "webp"], key="upload_logo"
+                )
+
                 whatsapp_input = st.text_input("Numéro WhatsApp", value=config.get("whatsapp", ""))
                 email_admin_input = st.text_input("Email de notification", value=config.get("email_admin", ""))
+
+                st.write("**Alertes automatiques**")
+                try:
+                    seuil_defaut = int(config.get("seuil_stock_bas", 3) or 3)
+                except (TypeError, ValueError):
+                    seuil_defaut = 3
+                try:
+                    heure_defaut = int(config.get("heure_bilan", 20) or 20)
+                except (TypeError, ValueError):
+                    heure_defaut = 20
+                seuil_stock_input = st.number_input(
+                    "Seuil de stock bas (déclenche l'alerte email)",
+                    min_value=0, step=1, value=seuil_defaut
+                )
+                heure_bilan_input = st.slider(
+                    "Heure d'envoi du bilan quotidien des ventes (UTC, 0-23h)",
+                    min_value=0, max_value=23, value=heure_defaut
+                )
+
                 if st.form_submit_button("Enregistrer"):
+                    logo_valeur = config.get("logo", "")
+                    if nouveau_logo_fichier is not None:
+                        url_logo = televerser_image_imgbb(nouveau_logo_fichier)
+                        if url_logo:
+                            logo_valeur = url_logo
+                        else:
+                            st.warning("Échec de l'envoi du logo vers ImgBB — l'ancien logo a été conservé.")
                     for cle, valeur in [
-                        ("nom_boutique", nom_boutique_input), ("logo", logo_input),
-                        ("whatsapp", whatsapp_input), ("email_admin", email_admin_input)
+                        ("nom_boutique", nom_boutique_input), ("logo", logo_valeur),
+                        ("whatsapp", whatsapp_input), ("email_admin", email_admin_input),
+                        ("seuil_stock_bas", str(int(seuil_stock_input))),
+                        ("heure_bilan", str(int(heure_bilan_input)))
                     ]:
                         sb_admin.table("config").upsert({"cle": cle, "valeur": valeur}).execute()
                     forcer_rafraichissement()
@@ -786,10 +1103,39 @@ else:
 
         with tab_alertes:
             reponse = sb_admin.table("alertesstock").select("*").eq("statut", "en_attente").execute()
-            if not reponse.data:
+            alertes_en_attente = reponse.data or []
+            if not alertes_en_attente:
                 st.caption("Aucune alerte en attente")
-            for alerte in reponse.data:
-                st.write(f"{alerte['article']} — {alerte['contact_type']} : {alerte['contact']}")
+            else:
+                st.caption(
+                    "Les inscrits par email sont notifiés automatiquement dès que le stock repasse "
+                    "au-dessus de 0 (via l'onglet Catalogue). Les inscrits par téléphone sont à relancer "
+                    "manuellement sur WhatsApp ci-dessous."
+                )
+                articles_concernes = sorted({a["article"] for a in alertes_en_attente})
+                for article_nom in articles_concernes:
+                    alertes_article = [a for a in alertes_en_attente if a["article"] == article_nom]
+                    with st.expander(f"{article_nom} — {len(alertes_article)} inscrit(s)"):
+                        for alerte in alertes_article:
+                            if alerte.get("contact_type") == "telephone":
+                                tel_alerte = re.sub(r"\D", "", str(alerte.get("contact") or ""))
+                                message_alerte = (
+                                    f"Bonjour, l'article \"{article_nom}\" est de nouveau disponible "
+                                    f"sur {config.get('nom_boutique', 'notre boutique')} !"
+                                )
+                                lien_whatsapp_alerte = f"https://wa.me/{tel_alerte}?text={requests.utils.quote(message_alerte)}"
+                                col1, col2 = st.columns([3, 2])
+                                col1.write(f"📞 {alerte.get('contact')}")
+                                col2.link_button(
+                                    "💬 WhatsApp", lien_whatsapp_alerte,
+                                    key=f"wa_alerte_{alerte.get('id')}"
+                                )
+                            else:
+                                st.write(f"✉️ {alerte.get('contact')}")
+                        if st.button("🔔 Notifier les inscrits par email maintenant", key=f"notif_{article_nom}"):
+                            notifier_retour_stock(article_nom)
+                            st.success("Emails envoyés aux inscrits par email pour cet article.")
+                            st.rerun()
 
         with tab_paniers:
             reponse = sb_admin.table("paniersabandonnés").select("*").eq("statut", "en_attente").execute()
