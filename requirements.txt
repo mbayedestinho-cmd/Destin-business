@@ -2,3 +2,4 @@ streamlit
 pandas
 supabase>2.10.0
 requests
+plotty
