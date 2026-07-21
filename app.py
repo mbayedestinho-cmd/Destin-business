@@ -752,4 +752,4 @@ else:
                         st.link_button("💬 Relancer sur WhatsApp", lien_whatsapp)
                     if st.button("🗑️ Marquer comme traité", key=f"panier_traite_{cle_unique}"):
                         sb_admin.table("paniersabandonnés").update({"statut": "traite"}).eq("telephone", panier["telephone"]).execute()
-                        st.rerun(
+                        st.rerun()
