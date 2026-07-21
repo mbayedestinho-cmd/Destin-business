@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import uuid
 import re
+import json
 import html as html_lib
 import unicodedata
 import base64
@@ -14,6 +15,17 @@ import requests
 from email.mime.text import MIMEText
 from datetime import datetime, timezone
 from supabase import create_client, Client
+
+# 🔄 Permet à la boutique de se rafraîchir toute seule (nouveaux prix, stock,
+# logo...) sans que le client n'ait besoin d'appuyer sur "actualiser".
+# Nécessite le paquet "streamlit-autorefresh" dans requirements.txt -- si le
+# paquet n'est pas encore installé, l'app continue de fonctionner normalement,
+# simplement sans l'auto-rafraîchissement (dégradation silencieuse).
+try:
+    from streamlit_autorefresh import st_autorefresh
+    AUTOREFRESH_DISPONIBLE = True
+except ImportError:
+    AUTOREFRESH_DISPONIBLE = False
 
 st.set_page_config(page_title="Destiny Luxury Collection", page_icon="👗", layout="wide")
 
@@ -373,6 +385,26 @@ def afficher_hero(logo_url, titre, sous_titre=""):
         )
 
 
+# ====================== 4bis. PANIER PERSISTANT (survit à un redéploiement) ======================
+# 🔒 FIX : le panier vit normalement dans st.session_state, qui est stocké en
+# mémoire côté serveur. Or un redéploiement de l'app (ex: ajout d'un paquet
+# dans requirements.txt) redémarre le serveur et efface TOUTE la mémoire de
+# TOUTES les sessions en cours -- même chose si le client perd sa connexion
+# WiFi/4G un instant. Pour que le panier d'un client ne disparaisse pas dans
+# ces cas-là, on le duplique dans l'URL de la page : dès qu'il change, il est
+# encodé dans le paramètre ?panier=... . Si le navigateur se reconnecte
+# (après un redéploiement ou une coupure réseau), l'app relit ce paramètre et
+# reconstruit le panier automatiquement, sans que le client s'en aperçoive.
+def synchroniser_panier_url():
+    try:
+        if st.session_state.cart:
+            st.query_params["panier"] = json.dumps(st.session_state.cart, separators=(",", ":"))
+        elif "panier" in st.query_params:
+            del st.query_params["panier"]
+    except Exception:
+        pass  # la persistance du panier est un bonus, jamais bloquant
+
+
 def jouer_son_ajout():
     """Joue un petit carillon raffiné (généré à la volée, aucun fichier audio
     nécessaire) au moment où un article est ajouté au panier. Certains
@@ -406,7 +438,7 @@ def jouer_son_ajout():
 
 
 # ====================== 4. DONNÉES (mise en cache + TTL) ======================
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=20)
 def charger_catalogue(_refresh=0):
     reponse = sb.table("catalogue").select("*").execute()
     df = pd.DataFrame(reponse.data)
@@ -418,7 +450,7 @@ def charger_catalogue(_refresh=0):
     return df
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=20)
 def charger_config(_refresh=0):
     reponse = sb.table("config").select("*").execute()
     return {row["cle"]: row["valeur"] for row in reponse.data}
@@ -471,6 +503,17 @@ if "refresh_token" not in st.session_state:
     st.session_state.refresh_token = 0
 if "cart" not in st.session_state:
     st.session_state.cart = []
+    # 🔄 Tentative de restauration du panier depuis l'URL (voir
+    # synchroniser_panier_url ci-dessus) -- couvre le cas d'un redéploiement
+    # ou d'une reconnexion réseau pendant que le client faisait ses achats.
+    panier_url = st.query_params.get("panier")
+    if panier_url:
+        try:
+            panier_restaure = json.loads(panier_url)
+            if isinstance(panier_restaure, list):
+                st.session_state.cart = panier_restaure
+        except Exception:
+            pass
 if "dernier_panier_signature" not in st.session_state:
     st.session_state.dernier_panier_signature = None
 if "message_toast" not in st.session_state:
@@ -740,6 +783,14 @@ if mode_admin and not st.session_state.admin_connecte and st.session_state.acces
     mode_admin = False
 
 if not mode_admin:
+    # 🔄 Rafraîchissement automatique et silencieux de la boutique (toutes
+    # les 20 secondes) : dès que l'admin enregistre un changement (prix,
+    # stock, nom, logo...), les clients déjà en train de naviguer le voient
+    # apparaître tout seul, sans avoir à recharger la page. On ne l'active
+    # PAS côté admin pour ne pas interrompre la saisie des formulaires.
+    if AUTOREFRESH_DISPONIBLE:
+        st_autorefresh(interval=20000, key="rafraichissement_boutique")
+
     afficher_hero(LOGO_SUR, NOM_BOUTIQUE, SLOGAN_BOUTIQUE)
 
     with st.container():
@@ -844,6 +895,7 @@ if not mode_admin:
                             st.session_state.message_toast = f"{nom_affiche} ajouté au panier !"
                             st.session_state.icone_toast = "🛍️"
                             st.session_state.jouer_son = True
+                            synchroniser_panier_url()
                             st.rerun()
 
                     with st.expander("💬 Avis clients"):
@@ -888,6 +940,7 @@ if not mode_admin:
                 st.write(f"{label} × {item['quantite']} = {int(sous_total)} FCFA")
                 if st.button("🗑️", key=f"suppr_{i}"):
                     st.session_state.cart.pop(i)
+                    synchroniser_panier_url()
                     st.rerun()
 
             st.markdown(f"### Total : {int(total_panier)} FCFA")
@@ -938,6 +991,7 @@ if not mode_admin:
 
                     st.session_state.cart = []
                     st.session_state.dernier_panier_signature = None
+                    synchroniser_panier_url()
                     forcer_rafraichissement()
                     st.success(f"Commande {donnee.get('id_commande')} enregistrée ! Total : {int(donnee.get('total', 0))} FCFA")
                     if donnee.get("ruptures"):
