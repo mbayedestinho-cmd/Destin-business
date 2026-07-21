@@ -613,8 +613,6 @@ def jouer_son_ajout():
 def charger_catalogue(marchand_id, _refresh=0):
     reponse = sb.table("catalogue").select("*").eq("marchand_id", marchand_id).execute()
     df = pd.DataFrame(reponse.data)
-    if df.empty:
-        return df
     for col in ["prix", "prix_promo", "stock"]:
         if col not in df.columns:
             df[col] = 0
