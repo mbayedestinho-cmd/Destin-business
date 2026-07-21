@@ -541,9 +541,25 @@ else:
 
         with tab_catalogue:
             st.write("### Articles existants")
-            for idx_row, row in enumerate(df_catalogue.to_dict("records")):
-                with st.expander(f"{row['nom']} — stock {int(row.get('stock') or 0)}"):
-                    with st.form(f"edit_{idx_row}_{row['id']}"):
+            for idx, (_, row) in enumerate(df_catalogue.iterrows()):
+                # 🔧 FIX : certaines lignes ont un "id" vide ou dupliqué
+                # (données historiques mal migrées) -- sans repère unique,
+                # Streamlit plantait en créant deux widgets avec la même
+                # clé. On force l'unicité avec la position dans la liste,
+                # peu importe l'état des données.
+                cle_unique = f"{idx}_{row.get('id') or 'sansid'}"
+                id_manquant = not str(row.get("id") or "").strip()
+                titre_article = f"{row['nom']} — stock {int(row.get('stock') or 0)}"
+                if id_manquant:
+                    titre_article += " ⚠️ id manquant"
+                with st.expander(titre_article):
+                    if id_manquant:
+                        st.warning(
+                            "Cet article n'a pas d'identifiant (id) en base -- modification et "
+                            "suppression désactivées ici pour éviter de toucher la mauvaise ligne. "
+                            "Corrige son id directement dans le Table Editor Supabase."
+                        )
+                    with st.form(f"edit_{cle_unique}"):
                         nouveau_nom = st.text_input("Nom", value=row["nom"])
                         nouveau_prix = st.number_input("Prix", value=float(row.get("prix") or 0))
                         nouveau_stock = st.number_input("Stock", value=int(row.get("stock") or 0), step=1)
@@ -552,14 +568,14 @@ else:
                         nouvelles_couleurs = st.text_input("Couleurs (séparées par virgule)", value=row.get("couleurs") or "")
 
                         nouvelle_image_fichier = st.file_uploader(
-                            "Remplacer l'image principale", type=["jpg", "jpeg", "png", "webp"], key=f"img_{idx_row}_{row['id']}"
+                            "Remplacer l'image principale", type=["jpg", "jpeg", "png", "webp"], key=f"img_{cle_unique}"
                         )
                         nouvelles_images_supp = st.file_uploader(
                             "Ajouter des images supplémentaires", type=["jpg", "jpeg", "png", "webp"],
-                            accept_multiple_files=True, key=f"imgs_{idx_row}_{row['id']}"
+                            accept_multiple_files=True, key=f"imgs_{cle_unique}"
                         )
 
-                        if st.form_submit_button("Enregistrer"):
+                        if st.form_submit_button("Enregistrer", disabled=id_manquant):
                             maj = {
                                 "nom": nouveau_nom, "prix": nouveau_prix, "stock": nouveau_stock,
                                 "categorie": nouvelle_categorie, "tailles": nouvelles_tailles,
@@ -582,23 +598,10 @@ else:
                             forcer_rafraichissement()
                             st.success("Article mis à jour")
                             st.rerun()
-                    if st.button("🗑️ Supprimer", key=f"del_{idx_row}_{row['id']}"):
-                        try:
-                            sb_admin.table("catalogue").delete().eq("id", row["id"]).execute()
-                            forcer_rafraichissement()
-                            st.success("Article supprimé")
-                            st.rerun()
-                        except Exception as e:
-                            message_erreur = str(e)
-                            if "23503" in message_erreur or "foreign key" in message_erreur.lower():
-                                st.error(
-                                    "Impossible de supprimer cet article : il est encore référencé par au moins "
-                                    "une commande, un avis, une alerte stock ou un panier abandonné. "
-                                    "Tu peux plutôt mettre son stock à 0 pour le masquer, ou supprimer d'abord "
-                                    "les éléments liés."
-                                )
-                            else:
-                                st.error(f"Échec de la suppression : {message_erreur}")
+                    if not id_manquant and st.button("🗑️ Supprimer", key=f"del_{cle_unique}"):
+                        sb_admin.table("catalogue").delete().eq("id", row["id"]).execute()
+                        forcer_rafraichissement()
+                        st.rerun()
 
             st.write("### Ajouter un article")
             with st.form("ajout_article", clear_on_submit=True):
@@ -678,15 +681,16 @@ else:
         with tab_commandes:
             reponse = sb_admin.table("commandes").select("*").order("date", desc=True).limit(100).execute()
             statuts_possibles = ["En cours", "Confirmée", "Livrée", "Annulée"]
-            for idx_cmd, cmd in enumerate(reponse.data):
+            for idx, cmd in enumerate(reponse.data):
+                cle_unique = f"{idx}_{cmd.get('id') or 'sansid'}"
                 with st.expander(f"{cmd.get('id')} — {cmd.get('client_nom')} — {cmd.get('price')} FCFA — {cmd.get('statut')}"):
                     st.json(cmd.get("articles"))
                     statut_actuel = cmd.get("statut", "En cours")
                     index_defaut = statuts_possibles.index(statut_actuel) if statut_actuel in statuts_possibles else 0
                     nouveau_statut = st.selectbox(
-                        "Statut", statuts_possibles, index=index_defaut, key=f"statut_{idx_cmd}_{cmd.get('id')}"
+                        "Statut", statuts_possibles, index=index_defaut, key=f"statut_{cle_unique}"
                     )
-                    if st.button("Mettre à jour", key=f"maj_{idx_cmd}_{cmd.get('id')}"):
+                    if st.button("Mettre à jour", key=f"maj_{cle_unique}"):
                         sb_admin.table("commandes").update({"statut": nouveau_statut}).eq("id", cmd["id"]).execute()
                         st.rerun()
 
@@ -694,15 +698,16 @@ else:
             reponse = sb_admin.table("avis").select("*").eq("statut", "en_attente").execute()
             if not reponse.data:
                 st.caption("Aucun avis en attente")
-            for idx_avis, avis_item in enumerate(reponse.data):
+            for idx, avis_item in enumerate(reponse.data):
+                cle_unique = f"{idx}_{avis_item.get('id') or 'sansid'}"
                 with st.expander(f"{avis_item['client_nom']} — {avis_item['article_nom']} — {'⭐' * int(avis_item['note'])}"):
                     st.write(avis_item.get("commentaire") or "(pas de commentaire)")
                     col1, col2 = st.columns(2)
-                    if col1.button("✅ Approuver", key=f"appr_{idx_avis}_{avis_item['id']}"):
+                    if col1.button("✅ Approuver", key=f"appr_{cle_unique}"):
                         sb_admin.table("avis").update({"statut": "approuve"}).eq("id", avis_item["id"]).execute()
                         forcer_rafraichissement()
                         st.rerun()
-                    if col2.button("🗑️ Supprimer", key=f"suppr_avis_{idx_avis}_{avis_item['id']}"):
+                    if col2.button("🗑️ Supprimer", key=f"suppr_avis_{cle_unique}"):
                         sb_admin.table("avis").delete().eq("id", avis_item["id"]).execute()
                         forcer_rafraichissement()
                         st.rerun()
@@ -735,7 +740,8 @@ else:
             paniers = sorted(reponse.data, key=lambda p: p.get("date_derniere_maj", ""), reverse=True)
             if not paniers:
                 st.caption("Aucun panier abandonné en attente")
-            for idx_panier, panier in enumerate(paniers):
+            for idx, panier in enumerate(paniers):
+                cle_unique = f"{idx}_{panier.get('telephone') or 'sanstelephone'}"
                 total = panier.get("total") or 0
                 with st.expander(f"{panier.get('client_nom') or 'Client'} — {panier.get('telephone')} — {total} FCFA"):
                     st.json(panier.get("articles"))
@@ -744,6 +750,6 @@ else:
                         message = f"Bonjour, vous avez laissé des articles dans votre panier sur {config.get('nom_boutique', 'notre boutique')} — puis-je vous aider à finaliser votre commande ?"
                         lien_whatsapp = f"https://wa.me/{tel_relance}?text={requests.utils.quote(message)}"
                         st.link_button("💬 Relancer sur WhatsApp", lien_whatsapp)
-                    if st.button("🗑️ Marquer comme traité", key=f"panier_traite_{idx_panier}_{panier.get('telephone')}"):
+                    if st.button("🗑️ Marquer comme traité", key=f"panier_traite_{cle_unique}"):
                         sb_admin.table("paniersabandonnés").update({"statut": "traite"}).eq("telephone", panier["telephone"]).execute()
                         st.rerun()
