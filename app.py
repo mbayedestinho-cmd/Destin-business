@@ -722,6 +722,7 @@ except Exception:
     pass
 
 NOM_BOUTIQUE = html_lib.escape(config.get("nom_boutique", "Destiny Luxury Collection"))
+SLOGAN_BOUTIQUE = html_lib.escape(config.get("slogan", "Élégance • Exclusivité • Luxe"))
 LOGO_URL = config.get("logo", "")
 LOGO_SUR = LOGO_URL if re.match(r"^https?://", str(LOGO_URL).strip(), re.IGNORECASE) else ""
 WHATSAPP = re.sub(r"\D", "", str(config.get("whatsapp") or ""))
@@ -739,7 +740,7 @@ if mode_admin and not st.session_state.admin_connecte and st.session_state.acces
     mode_admin = False
 
 if not mode_admin:
-    afficher_hero(LOGO_SUR, NOM_BOUTIQUE, "Élégance • Exclusivité • Luxe")
+    afficher_hero(LOGO_SUR, NOM_BOUTIQUE, SLOGAN_BOUTIQUE)
 
     with st.container():
         if df_catalogue.empty:
@@ -1398,8 +1399,16 @@ else:
                     st.plotly_chart(fig_stock, use_container_width=True)
 
         with tab_config:
-            with st.form("form_config"):
-                nom_boutique_input = st.text_input("Nom de la boutique", value=config.get("nom_boutique", ""))
+            st.write("### 🖼️ Identité de la boutique")
+            st.caption("Nom, slogan et logo — ce bloc a son propre bouton, indépendant du reste de la configuration.")
+            with st.form("form_identite"):
+                nom_boutique_input = st.text_input(
+                    "Nom de la boutique", value=config.get("nom_boutique", ""), key="input_nom_boutique"
+                )
+                slogan_input = st.text_input(
+                    "Slogan (affiché sous le nom)", value=config.get("slogan", "Élégance • Exclusivité • Luxe"),
+                    key="input_slogan"
+                )
 
                 st.write("**Logo de la boutique**")
                 if config.get("logo") and re.match(r"^https?://", str(config.get("logo")).strip(), re.IGNORECASE):
@@ -1411,6 +1420,44 @@ else:
                     key=f"upload_logo_{st.session_state.refresh_token}"
                 )
 
+                if st.form_submit_button("✅ Valider le nom, le slogan et le logo"):
+                    logo_valeur = config.get("logo", "")
+                    echec_logo = False
+                    if nouveau_logo_fichier is not None:
+                        url_logo, erreur_upload = televerser_image_imgbb(nouveau_logo_fichier)
+                        if url_logo:
+                            logo_valeur = url_logo
+                        else:
+                            echec_logo = True
+                            st.error(f"❌ Échec de l'envoi du logo : {erreur_upload or 'raison inconnue'} — l'ancien logo a été conservé.")
+
+                    # 🔒 FIX : avant, si l'écriture en base échouait pour une
+                    # raison quelconque (RLS, réseau, colonne manquante...),
+                    # l'exception remontait sans être attrapée : le script
+                    # plantait AVANT d'afficher le moindre message, et rien
+                    # n'était enregistré -- ni le nom, ni le slogan, ni le
+                    # logo -- sans que tu saches pourquoi. Le message
+                    # d'erreur exact s'affiche maintenant clairement.
+                    try:
+                        for cle, valeur in [
+                            ("nom_boutique", nom_boutique_input),
+                            ("slogan", slogan_input),
+                            ("logo", logo_valeur),
+                        ]:
+                            sb_admin.table("config").upsert({"cle": cle, "valeur": valeur}).execute()
+                    except Exception as e:
+                        st.error(f"❌ L'enregistrement en base a échoué : {e}")
+                    else:
+                        forcer_rafraichissement()
+                        if echec_logo:
+                            st.warning("Le nom et le slogan ont bien été enregistrés, mais le logo n'a PAS changé (voir l'erreur ci-dessus).")
+                        else:
+                            st.success("✅ Nom, slogan et logo enregistrés avec succès.")
+                        st.rerun()
+
+            st.divider()
+            st.write("### ⚙️ Contact et alertes")
+            with st.form("form_config"):
                 whatsapp_input = st.text_input("Numéro WhatsApp", value=config.get("whatsapp", ""))
                 email_admin_input = st.text_input("Email de notification", value=config.get("email_admin", ""))
 
@@ -1433,28 +1480,19 @@ else:
                 )
 
                 if st.form_submit_button("Enregistrer"):
-                    logo_valeur = config.get("logo", "")
-                    echec_logo = False
-                    if nouveau_logo_fichier is not None:
-                        url_logo, erreur_upload = televerser_image_imgbb(nouveau_logo_fichier)
-                        if url_logo:
-                            logo_valeur = url_logo
-                        else:
-                            echec_logo = True
-                            st.error(f"❌ Échec de l'envoi du logo : {erreur_upload or 'raison inconnue'} — l'ancien logo a été conservé.")
-                    for cle, valeur in [
-                        ("nom_boutique", nom_boutique_input), ("logo", logo_valeur),
-                        ("whatsapp", whatsapp_input), ("email_admin", email_admin_input),
-                        ("seuil_stock_bas", str(int(seuil_stock_input))),
-                        ("heure_bilan", str(int(heure_bilan_input)))
-                    ]:
-                        sb_admin.table("config").upsert({"cle": cle, "valeur": valeur}).execute()
-                    forcer_rafraichissement()
-                    if echec_logo:
-                        st.warning("Le reste de la configuration a bien été enregistré, mais le logo n'a PAS changé (voir l'erreur ci-dessus). Réessaie l'envoi du logo.")
+                    try:
+                        for cle, valeur in [
+                            ("whatsapp", whatsapp_input), ("email_admin", email_admin_input),
+                            ("seuil_stock_bas", str(int(seuil_stock_input))),
+                            ("heure_bilan", str(int(heure_bilan_input)))
+                        ]:
+                            sb_admin.table("config").upsert({"cle": cle, "valeur": valeur}).execute()
+                    except Exception as e:
+                        st.error(f"❌ L'enregistrement en base a échoué : {e}")
                     else:
+                        forcer_rafraichissement()
                         st.success("Configuration mise à jour")
-                    st.rerun()
+                        st.rerun()
 
             st.divider()
             st.write("### 🔐 Changer le mot de passe admin")
