@@ -1083,15 +1083,22 @@ if not mode_admin:
                                 elif not throttle(f"alerte_{identifiant_produit}", 15):
                                     st.warning("Merci de patienter avant de retenter.")
                                 else:
-                                    sb.table("alertesstock").insert({
-                                        "date_inscription": datetime.now(timezone.utc).isoformat(),
-                                        "article": str(row["nom"]),
-                                        "contact_type": "email" if "@" in contact else "telephone",
-                                        "contact": contact.strip(),
-                                        "statut": "en_attente",
-                                        "marchand_id": MARCHAND_ID
-                                    }).execute()
-                                    st.success("Inscription enregistrée !")
+                                    # 🆕 Passe par une fonction RPC (creer_alerte_stock) plutôt
+                                    # qu'un insert direct : la policy RLS sur "alertesstock" ne
+                                    # permettait pas l'insertion anonyme (erreur 401 / 42501),
+                                    # et pour une marketplace multi-marchands on veut que le
+                                    # marchand_id et le statut soient validés côté serveur plutôt
+                                    # que fournis tels quels par le client.
+                                    try:
+                                        sb.rpc("creer_alerte_stock", {
+                                            "p_article": str(row["nom"]),
+                                            "p_contact_type": "email" if "@" in contact else "telephone",
+                                            "p_contact": contact.strip(),
+                                            "p_marchand_id": MARCHAND_ID
+                                        }).execute()
+                                        st.success("Inscription enregistrée !")
+                                    except Exception:
+                                        st.error("Une erreur est survenue, merci de réessayer.")
                     else:
                         options_taille = [t.strip() for t in str(row.get("tailles") or "").split(",") if t.strip()]
                         options_couleur = [c.strip() for c in str(row.get("couleurs") or "").split(",") if c.strip()]
@@ -1210,8 +1217,10 @@ if not mode_admin:
                             f"- {a['nom']} x{a['quantite']}" for a in donnee.get("articles", [])
                         )
                         message_whatsapp = (
-                            f"Bonjour, je viens de passer la commande {donnee.get('id_commande')} :\n"
-                            f"{recap}\nTotal : {int(donnee.get('total', 0))} FCFA"
+                            f"Bonjour, je m'appelle {client_nom.strip()} et je viens de passer "
+                            f"la commande {donnee.get('id_commande')} :\n"
+                            f"{recap}\nTotal : {int(donnee.get('total', 0))} FCFA\n"
+                            f"Mon téléphone : {client_tel.strip()}"
                         )
                         lien_whatsapp = f"https://wa.me/{WHATSAPP}?text={requests.utils.quote(message_whatsapp)}"
                         st.link_button("💬 Confirmer aussi sur WhatsApp", lien_whatsapp)
