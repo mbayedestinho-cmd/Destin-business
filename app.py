@@ -1060,11 +1060,12 @@ else:
                         nouvelles_couleurs = st.text_input("Couleurs (séparées par virgule)", value=row.get("couleurs") or "")
 
                         nouvelle_image_fichier = st.file_uploader(
-                            "Remplacer l'image principale", type=["jpg", "jpeg", "png", "webp"], key=f"img_{cle_unique}"
+                            "Remplacer l'image principale", type=["jpg", "jpeg", "png", "webp"],
+                            key=f"img_{cle_unique}_{st.session_state.refresh_token}"
                         )
                         nouvelles_images_supp = st.file_uploader(
                             "Ajouter des images supplémentaires", type=["jpg", "jpeg", "png", "webp"],
-                            accept_multiple_files=True, key=f"imgs_{cle_unique}"
+                            accept_multiple_files=True, key=f"imgs_{cle_unique}_{st.session_state.refresh_token}"
                         )
 
                         if st.form_submit_button("Enregistrer", disabled=id_manquant):
@@ -1406,7 +1407,8 @@ else:
                 else:
                     st.caption("Aucun logo pour le moment.")
                 nouveau_logo_fichier = st.file_uploader(
-                    "Choisir un logo (remplace l'actuel)", type=["jpg", "jpeg", "png", "webp"], key="upload_logo"
+                    "Choisir un logo (remplace l'actuel)", type=["jpg", "jpeg", "png", "webp"],
+                    key=f"upload_logo_{st.session_state.refresh_token}"
                 )
 
                 whatsapp_input = st.text_input("Numéro WhatsApp", value=config.get("whatsapp", ""))
@@ -1432,12 +1434,14 @@ else:
 
                 if st.form_submit_button("Enregistrer"):
                     logo_valeur = config.get("logo", "")
+                    echec_logo = False
                     if nouveau_logo_fichier is not None:
                         url_logo, erreur_upload = televerser_image_imgbb(nouveau_logo_fichier)
                         if url_logo:
                             logo_valeur = url_logo
                         else:
-                            st.error(f"Échec de l'envoi du logo : {erreur_upload or 'raison inconnue'} — l'ancien logo a été conservé.")
+                            echec_logo = True
+                            st.error(f"❌ Échec de l'envoi du logo : {erreur_upload or 'raison inconnue'} — l'ancien logo a été conservé.")
                     for cle, valeur in [
                         ("nom_boutique", nom_boutique_input), ("logo", logo_valeur),
                         ("whatsapp", whatsapp_input), ("email_admin", email_admin_input),
@@ -1446,7 +1450,10 @@ else:
                     ]:
                         sb_admin.table("config").upsert({"cle": cle, "valeur": valeur}).execute()
                     forcer_rafraichissement()
-                    st.success("Configuration mise à jour")
+                    if echec_logo:
+                        st.warning("Le reste de la configuration a bien été enregistré, mais le logo n'a PAS changé (voir l'erreur ci-dessus). Réessaie l'envoi du logo.")
+                    else:
+                        st.success("Configuration mise à jour")
                     st.rerun()
 
             st.divider()
