@@ -984,9 +984,9 @@ try:
 except Exception:
     pass
 
-NOM_BOUTIQUE = html_lib.escape(config.get("nom_boutique", "Destiny Luxury Collection"))
-SLOGAN_BOUTIQUE = html_lib.escape(config.get("slogan", "Élégance • Exclusivité • Luxe"))
-LOGO_URL = config.get("logo", "")
+NOM_BOUTIQUE = html_lib.escape(config.get("nom_boutique") or "Destiny Luxury Collection")
+SLOGAN_BOUTIQUE = html_lib.escape(config.get("slogan") or "Élégance • Exclusivité • Luxe")
+LOGO_URL = config.get("logo") or ""
 LOGO_SUR = LOGO_URL if re.match(r"^https?://", str(LOGO_URL).strip(), re.IGNORECASE) else ""
 WHATSAPP = re.sub(r"\D", "", str(config.get("whatsapp") or ""))
 
@@ -1739,10 +1739,10 @@ else:
             st.caption("Nom, slogan et logo — ce bloc a son propre bouton, indépendant du reste de la configuration.")
             with st.form("form_identite"):
                 nom_boutique_input = st.text_input(
-                    "Nom de la boutique", value=config.get("nom_boutique", ""), key="input_nom_boutique"
+                    "Nom de la boutique", value=config.get("nom_boutique") or "", key="input_nom_boutique"
                 )
                 slogan_input = st.text_input(
-                    "Slogan (affiché sous le nom)", value=config.get("slogan", "Élégance • Exclusivité • Luxe"),
+                    "Slogan (affiché sous le nom)", value=config.get("slogan") or "Élégance • Exclusivité • Luxe",
                     key="input_slogan"
                 )
 
@@ -1757,7 +1757,7 @@ else:
                 )
 
                 if st.form_submit_button("✅ Valider le nom, le slogan et le logo"):
-                    logo_valeur = config.get("logo", "")
+                    logo_valeur = config.get("logo") or ""
                     echec_logo = False
                     if nouveau_logo_fichier is not None:
                         url_logo, erreur_upload = televerser_image_imgbb(nouveau_logo_fichier)
@@ -1794,8 +1794,8 @@ else:
             st.divider()
             st.write("### ⚙️ Contact et alertes")
             with st.form("form_config"):
-                whatsapp_input = st.text_input("Numéro WhatsApp", value=config.get("whatsapp", ""))
-                email_admin_input = st.text_input("Email de notification", value=config.get("email_admin", ""))
+                whatsapp_input = st.text_input("Numéro WhatsApp", value=config.get("whatsapp") or "")
+                email_admin_input = st.text_input("Email de notification", value=config.get("email_admin") or "")
 
                 st.write("**Alertes automatiques**")
                 try:
