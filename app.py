@@ -616,8 +616,9 @@ def charger_catalogue(marchand_id, _refresh=0):
     if df.empty:
         return df
     for col in ["prix", "prix_promo", "stock"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+        if col not in df.columns:
+            df[col] = 0
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
     return df
 
 
