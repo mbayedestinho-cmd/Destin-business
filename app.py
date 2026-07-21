@@ -232,6 +232,36 @@ def get_admin_client() -> Client:
 
 sb = get_public_client()
 
+
+# ====================== 2bis. MARCHAND ACTIF (marketplace) ======================
+# Cette instance de l'app sert une seule boutique pour l'instant. MARCHAND_SLUG
+# identifie laquelle parmi la table `marchands` -- si un jour l'app sert
+# plusieurs boutiques (un déploiement par marchand par ex.), il suffira de
+# faire varier ce secret d'un déploiement à l'autre.
+MARCHAND_SLUG = st.secrets.get("MARCHAND_SLUG", "destiny-luxury")
+
+
+@st.cache_resource
+def charger_marchand_id():
+    # Client admin (service_role) utilisé ici volontairement : il bypasse RLS,
+    # donc ça marche même si le marchand est suspendu (on veut pouvoir
+    # afficher un message de suspension plutôt que planter silencieusement).
+    reponse = (
+        get_admin_client()
+        .table("marchands")
+        .select("id")
+        .eq("slug", MARCHAND_SLUG)
+        .single()
+        .execute()
+    )
+    if not reponse.data:
+        st.error(f"Marchand introuvable pour le slug '{MARCHAND_SLUG}'.")
+        st.stop()
+    return reponse.data["id"]
+
+
+MARCHAND_ID = charger_marchand_id()
+
 if "admin_connecte" not in st.session_state:
     st.session_state.admin_connecte = False
 
@@ -554,7 +584,7 @@ def jouer_son_ajout():
 # ====================== 4. DONNÉES (mise en cache + TTL) ======================
 @st.cache_data(ttl=20)
 def charger_catalogue(_refresh=0):
-    reponse = sb.table("catalogue").select("*").execute()
+    reponse = sb.table("catalogue").select("*").eq("marchand_id", MARCHAND_ID).execute()
     df = pd.DataFrame(reponse.data)
     if df.empty:
         return df
@@ -578,7 +608,7 @@ def charger_tous_avis_approuves(_refresh=0):
     Python ensuite -- avec 12 produits sur la page, ça faisait 12
     aller-retours réseau redondants, une cause majeure de latence perçue
     (surtout en mobile où chaque round-trip pèse plus lourd)."""
-    reponse = sb.table("avis").select("*").eq("statut", "approuve").execute()
+    reponse = sb.table("avis").select("*").eq("statut", "approuve").eq("marchand_id", MARCHAND_ID).execute()
     return reponse.data
 
 
@@ -681,12 +711,19 @@ def sauvegarder_panier_abandonne(tel, nom, articles):
         "telephone": tel,
         "articles": [{"nom": a["nom"], "prix": a["prix"], "quantite": a["quantite"]} for a in articles],
         "total": total,
-        "statut": "en_attente"
+        "statut": "en_attente",
+        "marchand_id": MARCHAND_ID
     }
     try:
-        existant = sb.table("paniersabandonnés").select("telephone").eq("telephone", tel).execute()
+        existant = (
+            sb.table("paniersabandonnés")
+            .select("telephone")
+            .eq("telephone", tel)
+            .eq("marchand_id", MARCHAND_ID)
+            .execute()
+        )
         if existant.data:
-            sb.table("paniersabandonnés").update(donnees).eq("telephone", tel).execute()
+            sb.table("paniersabandonnés").update(donnees).eq("telephone", tel).eq("marchand_id", MARCHAND_ID).execute()
         else:
             donnees["date_creation"] = maintenant
             sb.table("paniersabandonnés").insert(donnees).execute()
@@ -700,7 +737,7 @@ def marquer_panier_converti(tel):
     if not tel:
         return
     try:
-        sb.table("paniersabandonnés").update({"statut": "converti"}).eq("telephone", tel).execute()
+        sb.table("paniersabandonnés").update({"statut": "converti"}).eq("telephone", tel).eq("marchand_id", MARCHAND_ID).execute()
     except Exception:
         pass
 
@@ -773,7 +810,14 @@ def notifier_retour_stock(nom_article):
     manuelle (pas d'API WhatsApp disponible pour un envoi 100% automatique)."""
     try:
         sb_bg = get_admin_client()
-        reponse = sb_bg.table("alertesstock").select("*").eq("article", nom_article).eq("statut", "en_attente").execute()
+        reponse = (
+            sb_bg.table("alertesstock")
+            .select("*")
+            .eq("article", nom_article)
+            .eq("statut", "en_attente")
+            .eq("marchand_id", MARCHAND_ID)
+            .execute()
+        )
     except Exception:
         return
     nom_boutique_actuel = charger_config(st.session_state.refresh_token).get("nom_boutique", "notre boutique")
@@ -841,7 +885,7 @@ def verifier_bilan_quotidien(config):
     try:
         debut_jour = maintenant.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
         sb_bg = get_admin_client()
-        reponse = sb_bg.table("commandes").select("*").gte("date", debut_jour).execute()
+        reponse = sb_bg.table("commandes").select("*").gte("date", debut_jour).eq("marchand_id", MARCHAND_ID).execute()
     except Exception:
         return
 
@@ -983,7 +1027,8 @@ if not mode_admin:
                                         "article": str(row["nom"]),
                                         "contact_type": "email" if "@" in contact else "telephone",
                                         "contact": contact.strip(),
-                                        "statut": "en_attente"
+                                        "statut": "en_attente",
+                                        "marchand_id": MARCHAND_ID
                                     }).execute()
                                     st.success("Inscription enregistrée !")
                     else:
@@ -1162,6 +1207,7 @@ if not mode_admin:
                                 sb.table("commandes")
                                 .select("id, date, statut, price, articles")
                                 .eq("tel", otp_en_cours["tel"])
+                                .eq("marchand_id", MARCHAND_ID)
                                 .order("date", desc=True)
                                 .limit(5)
                                 .execute()
@@ -1350,7 +1396,8 @@ else:
                             "nom": nom, "prix": int(prix), "stock": stock,
                             "image": url_principale, "images_supplementaires": ", ".join(urls_supp),
                             "categorie": categorie, "tailles": tailles, "couleurs": couleurs,
-                            "date_ajout": datetime.now(timezone.utc).isoformat()
+                            "date_ajout": datetime.now(timezone.utc).isoformat(),
+                            "marchand_id": MARCHAND_ID
                         }).execute()
                         forcer_rafraichissement()
                         st.success("Article ajouté")
@@ -1417,7 +1464,14 @@ else:
                             st.rerun()
 
         with tab_commandes:
-            reponse = sb_admin.table("commandes").select("*").order("date", desc=True).limit(100).execute()
+            reponse = (
+                sb_admin.table("commandes")
+                .select("*")
+                .eq("marchand_id", MARCHAND_ID)
+                .order("date", desc=True)
+                .limit(100)
+                .execute()
+            )
             statuts_possibles = ["En cours", "Confirmée", "Livrée", "Annulée"]
             couleurs_statut = {
                 "En cours": "#8a7350", "Confirmée": "#c9a35c",
@@ -1506,7 +1560,7 @@ else:
                         st.rerun()
 
         with tab_avis:
-            reponse = sb_admin.table("avis").select("*").eq("statut", "en_attente").execute()
+            reponse = sb_admin.table("avis").select("*").eq("statut", "en_attente").eq("marchand_id", MARCHAND_ID).execute()
             if not reponse.data:
                 st.caption("Aucun avis en attente")
             for idx, avis_item in enumerate(reponse.data):
@@ -1525,7 +1579,13 @@ else:
 
         with tab_stats:
             st.write("### 📊 Statistiques avancées")
-            reponse_stats = sb_admin.table("commandes").select("*").order("date", desc=False).execute()
+            reponse_stats = (
+                sb_admin.table("commandes")
+                .select("*")
+                .eq("marchand_id", MARCHAND_ID)
+                .order("date", desc=False)
+                .execute()
+            )
             commandes_stats = reponse_stats.data or []
 
             THEME_GRAPHIQUE = dict(
@@ -1734,7 +1794,7 @@ else:
                         st.success("Mot de passe mis à jour avec succès — utilise-le dès ta prochaine connexion.")
 
         with tab_alertes:
-            reponse = sb_admin.table("alertesstock").select("*").eq("statut", "en_attente").execute()
+            reponse = sb_admin.table("alertesstock").select("*").eq("statut", "en_attente").eq("marchand_id", MARCHAND_ID).execute()
             alertes_en_attente = reponse.data or []
             if not alertes_en_attente:
                 st.caption("Aucune alerte en attente")
@@ -1770,7 +1830,7 @@ else:
                             st.rerun()
 
         with tab_paniers:
-            reponse = sb_admin.table("paniersabandonnés").select("*").eq("statut", "en_attente").execute()
+            reponse = sb_admin.table("paniersabandonnés").select("*").eq("statut", "en_attente").eq("marchand_id", MARCHAND_ID).execute()
             paniers = sorted(reponse.data, key=lambda p: p.get("date_derniere_maj", ""), reverse=True)
             if not paniers:
                 st.caption("Aucun panier abandonné en attente")
@@ -1785,5 +1845,5 @@ else:
                         lien_whatsapp = f"https://wa.me/{tel_relance}?text={requests.utils.quote(message)}"
                         st.link_button("💬 Relancer sur WhatsApp", lien_whatsapp)
                     if st.button("🗑️ Marquer comme traité", key=f"panier_traite_{cle_unique}"):
-                        sb_admin.table("paniersabandonnés").update({"statut": "traite"}).eq("telephone", panier["telephone"]).execute()
+                        sb_admin.table("paniersabandonnés").update({"statut": "traite"}).eq("telephone", panier["telephone"]).eq("marchand_id", MARCHAND_ID).execute()
                         st.rerun()
