@@ -3,4 +3,4 @@ pandas
 supabase>2.10.0
 requests
 plotly
-streamit-autorefresh
+streamlit-autorefresh
