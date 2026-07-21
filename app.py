@@ -63,6 +63,15 @@ st.markdown("""
 
     /* Prix et titres produits */
     div[data-testid="stMarkdownContainer"] strong { color: #eae4d8; }
+    .destiny-nom-produit {
+        font-family: 'Playfair Display', serif;
+        font-size: 1.12rem;
+        font-weight: 700;
+        color: #eae4d8;
+        letter-spacing: 0.2px;
+        margin: 6px 0 2px 0;
+        line-height: 1.3;
+    }
 
     /* Bandeau promo doré */
     .destiny-promo-ligne { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin: 2px 0 4px 0; }
@@ -340,6 +349,30 @@ def afficher_galerie_swipe(images, hauteur=280, cle=""):
     components.html(code_html, height=hauteur + 26, scrolling=False)
 
 
+def afficher_hero(logo_url, titre, sous_titre=""):
+    """Affiche le bandeau logo + effet lumineux doré en arrière-plan, avec un
+    titre (ex: nom de la boutique, ou message de bienvenue) et un sous-titre
+    facultatif. Réutilisé pour la boutique ET pour l'écran d'accueil admin."""
+    sous_titre_html = f'<div class="destiny-tagline">{sous_titre}</div>' if sous_titre else ""
+    if logo_url:
+        st.markdown(
+            f'<div class="destiny-hero">'
+            f'<div class="destiny-hero-logo-wrap">'
+            f'<img src="{html_lib.escape(logo_url, quote=True)}">'
+            f'<div class="destiny-hero-shine"></div>'
+            f'</div>'
+            f'<h1>{titre}</h1>'
+            f'{sous_titre_html}'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown(
+            f'<div class="destiny-hero"><h1>{titre}</h1>{sous_titre_html}</div>',
+            unsafe_allow_html=True
+        )
+
+
 def jouer_son_ajout():
     """Joue un petit carillon raffiné (généré à la volée, aucun fichier audio
     nécessaire) au moment où un article est ajouté au panier. Certains
@@ -427,6 +460,26 @@ if "cart" not in st.session_state:
     st.session_state.cart = []
 if "dernier_panier_signature" not in st.session_state:
     st.session_state.dernier_panier_signature = None
+if "message_toast" not in st.session_state:
+    st.session_state.message_toast = None
+if "icone_toast" not in st.session_state:
+    st.session_state.icone_toast = "✅"
+if "jouer_son" not in st.session_state:
+    st.session_state.jouer_son = False
+if "acces_choisi" not in st.session_state:
+    st.session_state.acces_choisi = None
+
+# 🔔 st.toast() et le son ne s'affichaient jamais : ils étaient déclenchés
+# juste avant st.rerun(), qui interrompt le script et jette l'écran en cours
+# avant que le navigateur n'ait eu le temps de les afficher/jouer. On les
+# stocke donc dans la session et on les affiche ici, tout en haut du script,
+# une fois que le rerun est terminé et que la nouvelle page est stable.
+if st.session_state.message_toast:
+    st.toast(st.session_state.message_toast, icon=st.session_state.icone_toast)
+    st.session_state.message_toast = None
+if st.session_state.jouer_son:
+    jouer_son_ajout()
+    st.session_state.jouer_son = False
 
 
 def forcer_rafraichissement():
@@ -664,25 +717,14 @@ WHATSAPP = re.sub(r"\D", "", str(config.get("whatsapp") or ""))
 # admin -- les clients normaux ne voient que la boutique.
 mode_admin = st.query_params.get("admin") == "1"
 
+# 🔀 Si un visiteur arrivé sur l'URL secrète ?admin=1 a choisi "client" sur
+# l'écran d'accueil ci-dessous, on le renvoie directement vers la boutique
+# (sans avoir à retirer le paramètre d'URL).
+if mode_admin and not st.session_state.admin_connecte and st.session_state.acces_choisi == "client":
+    mode_admin = False
+
 if not mode_admin:
-    if LOGO_SUR:
-        st.markdown(
-            f'<div class="destiny-hero">'
-            f'<div class="destiny-hero-logo-wrap">'
-            f'<img src="{html_lib.escape(LOGO_SUR, quote=True)}">'
-            f'<div class="destiny-hero-shine"></div>'
-            f'</div>'
-            f'<h1>{NOM_BOUTIQUE}</h1>'
-            f'<div class="destiny-tagline">Élégance • Exclusivité • Luxe</div>'
-            f'</div>',
-            unsafe_allow_html=True
-        )
-    else:
-        st.markdown(
-            f'<div class="destiny-hero"><h1>{NOM_BOUTIQUE}</h1>'
-            f'<div class="destiny-tagline">Élégance • Exclusivité • Luxe</div></div>',
-            unsafe_allow_html=True
-        )
+    afficher_hero(LOGO_SUR, NOM_BOUTIQUE, "Élégance • Exclusivité • Luxe")
 
     with st.container():
         if df_catalogue.empty:
@@ -702,7 +744,7 @@ if not mode_admin:
             for idx, (_, row) in enumerate(df_affiche.iterrows()):
                 with colonnes_grille[idx % 3]:
                     identifiant_produit = normaliser(row.get("id") or row.get("nom"))
-                    nom_affiche = html_lib.escape(str(row["nom"]))
+                    nom_affiche = html_lib.escape(str(row["nom"]).strip())
 
                     # ---- Galerie multi-images ----
                     image_principale = str(row.get("image") or "")
@@ -715,7 +757,10 @@ if not mode_admin:
                     if toutes_images:
                         afficher_galerie_swipe(toutes_images, hauteur=280, cle=f"prod_{idx}")
 
-                    st.markdown(f"**{nom_affiche}**")
+                    st.markdown(
+                        f'<div class="destiny-nom-produit">{nom_affiche}</div>',
+                        unsafe_allow_html=True
+                    )
 
                     info_avis = (
                         avis_moyennes.get(identifiant_produit)
@@ -780,8 +825,9 @@ if not mode_admin:
                                     "couleur": couleur_choisie,
                                     "quantite": 1
                                 })
-                            jouer_son_ajout()
-                            st.toast(f"{row['nom']} ajouté au panier !", icon="🛍️")
+                            st.session_state.message_toast = f"{nom_affiche} ajouté au panier !"
+                            st.session_state.icone_toast = "🛍️"
+                            st.session_state.jouer_son = True
                             st.rerun()
 
                     with st.expander("💬 Avis clients"):
@@ -913,21 +959,43 @@ if not mode_admin:
 # ====================== 8. ADMIN ======================
 else:
     if not st.session_state.admin_connecte:
-        st.subheader("Connexion admin")
-        mdp_admin = st.text_input("Mot de passe", type="password")
-        if st.button("Se connecter"):
-            try:
-                if admin_login(mdp_admin):
+        if st.session_state.acces_choisi != "admin":
+            # ---- Écran d'accueil : logo + effet lumineux doré + message de bienvenue ----
+            afficher_hero(LOGO_SUR, f"Bienvenue chez {NOM_BOUTIQUE}", "Comment souhaitez-vous continuer ?")
+            col_client, col_admin = st.columns(2)
+            with col_client:
+                if st.button("🛍️ Je suis client / visiteur", use_container_width=True):
+                    st.session_state.acces_choisi = "client"
                     st.rerun()
-                else:
-                    st.error("Mot de passe incorrect.")
-            except Exception as e:
-                st.error(f"Échec de connexion : {e}")
+            with col_admin:
+                if st.button("🔐 Je suis administrateur", use_container_width=True):
+                    st.session_state.acces_choisi = "admin"
+                    st.rerun()
+        else:
+            # ---- Écran de connexion admin (mot de passe) ----
+            afficher_hero(LOGO_SUR, f"Bienvenue chez {NOM_BOUTIQUE}", "Connexion administrateur")
+            st.subheader("Connexion admin")
+            mdp_admin = st.text_input("Mot de passe", type="password")
+            col_connexion, col_retour = st.columns(2)
+            with col_connexion:
+                if st.button("Se connecter"):
+                    try:
+                        if admin_login(mdp_admin):
+                            st.rerun()
+                        else:
+                            st.error("Mot de passe incorrect.")
+                    except Exception as e:
+                        st.error(f"Échec de connexion : {e}")
+            with col_retour:
+                if st.button("↩️ Retour"):
+                    st.session_state.acces_choisi = None
+                    st.rerun()
     else:
         sb_admin = get_admin_client()
         st.success("Connecté en tant qu'admin")
         if st.button("Se déconnecter"):
             admin_logout()
+            st.session_state.acces_choisi = None
             st.rerun()
 
         (tab_catalogue, tab_promos, tab_commandes, tab_avis, tab_stats,
@@ -1442,4 +1510,4 @@ else:
                         st.link_button("💬 Relancer sur WhatsApp", lien_whatsapp)
                     if st.button("🗑️ Marquer comme traité", key=f"panier_traite_{cle_unique}"):
                         sb_admin.table("paniersabandonnés").update({"statut": "traite"}).eq("telephone", panier["telephone"]).execute()
-                        st.rerun()
+                        st.rerun(
