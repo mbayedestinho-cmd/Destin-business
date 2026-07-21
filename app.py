@@ -425,10 +425,35 @@ def charger_config(_refresh=0):
 
 
 @st.cache_data(ttl=30)
-def charger_avis_moyennes(_refresh=0):
+def charger_tous_avis_approuves(_refresh=0):
+    """Un SEUL appel réseau vers Supabase pour récupérer tous les avis
+    approuvés. Avant, chaque produit de la grille refaisait ce même appel
+    (SELECT * sur toute la table) rien que pour filtrer différemment en
+    Python ensuite -- avec 12 produits sur la page, ça faisait 12
+    aller-retours réseau redondants, une cause majeure de latence perçue
+    (surtout en mobile où chaque round-trip pèse plus lourd)."""
     reponse = sb.table("avis").select("*").eq("statut", "approuve").execute()
+    return reponse.data
+
+
+def indexer_avis_par_article(tous_avis):
+    """Range chaque avis dans un dictionnaire {article: [avis...]} une seule
+    fois, pour que l'affichage par produit ne soit plus qu'une simple lecture
+    en mémoire (aucun réseau) au lieu d'une requête Supabase."""
     par_article = {}
-    for row in reponse.data:
+    for row in tous_avis:
+        for cle in {normaliser(row.get("article_id")), normaliser(row.get("article_nom"))}:
+            if cle:
+                par_article.setdefault(cle, []).append(row)
+    for cle in par_article:
+        par_article[cle].sort(key=lambda r: r.get("date", ""), reverse=True)
+    return par_article
+
+
+@st.cache_data(ttl=30)
+def charger_avis_moyennes(_refresh=0):
+    par_article = {}
+    for row in charger_tous_avis_approuves(_refresh):
         cle_id = normaliser(row.get("article_id"))
         cle_nom = normaliser(row.get("article_nom"))
         for cle in {c for c in [cle_id, cle_nom] if c}:
@@ -440,18 +465,6 @@ def charger_avis_moyennes(_refresh=0):
         cle: {"moyenne": round(v["somme"] / v["count"], 1), "count": v["count"]}
         for cle, v in par_article.items()
     }
-
-
-@st.cache_data(ttl=30)
-def charger_avis_article(article_id, _refresh=0):
-    reponse = sb.table("avis").select("*").eq("statut", "approuve").execute()
-    article_id = normaliser(article_id)
-    trouves = [
-        r for r in reponse.data
-        if normaliser(r.get("article_id")) == article_id or normaliser(r.get("article_nom")) == article_id
-    ]
-    trouves.sort(key=lambda r: r.get("date", ""), reverse=True)
-    return trouves[:20]
 
 
 if "refresh_token" not in st.session_state:
@@ -487,6 +500,7 @@ def forcer_rafraichissement():
     charger_catalogue.clear()
     charger_config.clear()
     charger_avis_moyennes.clear()
+    charger_tous_avis_approuves.clear()
 
 
 # ====================== 5. PANIER ABANDONNÉ (auto-sauvegarde) ======================
@@ -696,6 +710,7 @@ def verifier_bilan_quotidien(config):
 config = charger_config(st.session_state.refresh_token)
 df_catalogue = charger_catalogue(st.session_state.refresh_token)
 avis_moyennes = charger_avis_moyennes(st.session_state.refresh_token)
+avis_par_article = indexer_avis_par_article(charger_tous_avis_approuves(st.session_state.refresh_token))
 
 # 🔔 Vérifications silencieuses (n'affichent rien, ne bloquent jamais la
 # page) -- envoient au plus un email par jour chacune, dès que quelqu'un
@@ -831,7 +846,7 @@ if not mode_admin:
                             st.rerun()
 
                     with st.expander("💬 Avis clients"):
-                        for avis_item in charger_avis_article(identifiant_produit, st.session_state.refresh_token):
+                        for avis_item in avis_par_article.get(identifiant_produit, [])[:20]:
                             st.markdown(f"**{html_lib.escape(str(avis_item['client_nom']))}** — {'⭐' * int(avis_item['note'])}")
                             if avis_item.get("commentaire"):
                                 st.caption(html_lib.escape(str(avis_item["commentaire"])))
