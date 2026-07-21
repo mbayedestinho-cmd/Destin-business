@@ -64,6 +64,20 @@ st.markdown("""
     /* Prix et titres produits */
     div[data-testid="stMarkdownContainer"] strong { color: #eae4d8; }
 
+    /* Bandeau promo doré */
+    .destiny-promo-ligne { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin: 2px 0 4px 0; }
+    .destiny-promo-ancien-prix {
+        color: #857f73; text-decoration: line-through; font-size: 0.85rem;
+    }
+    .destiny-promo-badge {
+        display: inline-flex; align-items: center; gap: 5px;
+        background: linear-gradient(135deg, #f0d9a6 0%, #c9a35c 45%, #a9803f 100%);
+        color: #16151a; font-weight: 700; padding: 4px 11px; border-radius: 20px;
+        font-size: 0.92rem; box-shadow: 0 2px 12px rgba(201,163,92,0.45);
+        letter-spacing: 0.2px;
+    }
+    .destiny-prix-normal { color: #eae4d8; font-weight: 600; font-size: 1.05rem; }
+
     /* Bandeau logo -- effet "bling" premium plein écran */
     .destiny-hero {
         position: relative;
@@ -686,9 +700,15 @@ if not mode_admin:
 
                     if en_promo:
                         reduction_pct = round((1 - prix_promo / prix) * 100) if prix else 0
-                        st.markdown(f"~~{int(prix)} FCFA~~ **{int(prix_promo)} FCFA** 🏷️ -{reduction_pct}%")
+                        st.markdown(
+                            f'<div class="destiny-promo-ligne">'
+                            f'<span class="destiny-promo-ancien-prix">{int(prix)} FCFA</span>'
+                            f'<span class="destiny-promo-badge">🏷️ {int(prix_promo)} FCFA · -{reduction_pct}%</span>'
+                            f'</div>',
+                            unsafe_allow_html=True
+                        )
                     else:
-                        st.markdown(f"**{int(prix)} FCFA**")
+                        st.markdown(f'<span class="destiny-prix-normal">{int(prix)} FCFA</span>', unsafe_allow_html=True)
 
                     if en_rupture:
                         st.error("Rupture de stock")
@@ -1004,6 +1024,39 @@ else:
                         st.rerun()
 
         with tab_promos:
+            st.write("### 🏷️ Promotions actives")
+            df_en_promo = df_catalogue[df_catalogue["prix_promo"].fillna(0) > 0].copy()
+            if df_en_promo.empty:
+                st.caption("Aucune promotion active actuellement.")
+            else:
+                colonnes_promo = st.columns(3)
+                for i, (_, ligne) in enumerate(df_en_promo.iterrows()):
+                    with colonnes_promo[i % 3]:
+                        image_promo = str(ligne.get("image") or "")
+                        if re.match(r"^https?://", image_promo.strip(), re.IGNORECASE):
+                            st.image(image_promo, use_container_width=True)
+                        else:
+                            st.caption("🚫 pas de photo")
+                        prix_original_promo = float(ligne.get("prix") or 0)
+                        prix_promo_valeur = float(ligne.get("prix_promo") or 0)
+                        reduction_pct = (
+                            round((1 - prix_promo_valeur / prix_original_promo) * 100)
+                            if prix_original_promo else 0
+                        )
+                        st.markdown(f"**{html_lib.escape(str(ligne['nom']))}**")
+                        st.markdown(
+                            f'<div class="destiny-promo-ligne">'
+                            f'<span class="destiny-promo-ancien-prix">{int(prix_original_promo)} FCFA</span>'
+                            f'<span class="destiny-promo-badge">🏷️ {int(prix_promo_valeur)} FCFA · -{reduction_pct}%</span>'
+                            f'</div>',
+                            unsafe_allow_html=True
+                        )
+                        if st.button("Retirer la promotion", key=f"retrait_promo_{ligne['id']}"):
+                            sb_admin.table("catalogue").update({"prix_promo": None}).eq("id", ligne["id"]).execute()
+                            forcer_rafraichissement()
+                            st.rerun()
+
+            st.divider()
             st.write("### Appliquer une promotion en masse")
             if df_catalogue.empty:
                 st.caption("Aucun article dans le catalogue.")
@@ -1030,28 +1083,87 @@ else:
                             st.success(f"Promotion appliquée à {len(articles_selectionnes)} article(s)")
                             st.rerun()
 
-                st.write("### Retirer des promotions")
-                articles_en_promo = df_catalogue[df_catalogue["prix_promo"].fillna(0) > 0]["nom"].tolist()
-                if not articles_en_promo:
-                    st.caption("Aucune promotion active actuellement.")
-                else:
-                    articles_a_retirer = st.multiselect("Articles à remettre au prix normal", articles_en_promo)
-                    if st.button("Retirer la promotion sur la sélection"):
-                        for nom_article in articles_a_retirer:
-                            ligne = df_catalogue[df_catalogue["nom"] == nom_article].iloc[0]
-                            sb_admin.table("catalogue").update({"prix_promo": None}).eq("id", ligne["id"]).execute()
-                        forcer_rafraichissement()
-                        st.success("Promotion(s) retirée(s)")
-                        st.rerun()
-
         with tab_commandes:
             reponse = sb_admin.table("commandes").select("*").order("date", desc=True).limit(100).execute()
             statuts_possibles = ["En cours", "Confirmée", "Livrée", "Annulée"]
-            for idx, cmd in enumerate(reponse.data):
+            couleurs_statut = {
+                "En cours": "#8a7350", "Confirmée": "#c9a35c",
+                "Livrée": "#4caf7d", "Annulée": "#e35d5d"
+            }
+            commandes_data = reponse.data or []
+            if not commandes_data:
+                st.caption("Aucune commande pour le moment.")
+            for idx, cmd in enumerate(commandes_data):
                 cle_unique = f"{idx}_{cmd.get('id') or 'sansid'}"
-                with st.expander(f"{cmd.get('id')} — {cmd.get('client_nom')} — {cmd.get('price')} FCFA — {cmd.get('statut')}"):
-                    st.json(cmd.get("articles"))
-                    statut_actuel = cmd.get("statut", "En cours")
+                statut_actuel = cmd.get("statut") or "En cours"
+                couleur_statut = couleurs_statut.get(statut_actuel, "#8a7350")
+                reference = str(cmd.get("id") or "—")
+                reference_courte = reference[:8] if reference != "—" else "—"
+                try:
+                    date_affichee = pd.to_datetime(cmd.get("date")).strftime("%d/%m/%Y %H:%M")
+                except Exception:
+                    date_affichee = str(cmd.get("date") or "—")
+                total_cmd = cmd.get("price") or 0
+                articles_cmd = cmd.get("articles") or []
+
+                with st.expander(f"🧾 {reference_courte} — {cmd.get('client_nom') or 'Client'} — {int(total_cmd)} FCFA — {statut_actuel}"):
+                    st.markdown(
+                        f'''<div style="display:flex; justify-content:space-between; align-items:center;
+                                      flex-wrap:wrap; gap:14px; padding:12px 16px; margin-bottom:14px;
+                                      background:linear-gradient(135deg, rgba(201,163,92,0.12), rgba(201,163,92,0.03));
+                                      border:1px solid rgba(201,163,92,0.3); border-radius:10px;">
+                            <div>
+                                <div style="color:#9a948a; font-size:0.72rem; letter-spacing:1px; text-transform:uppercase;">Référence</div>
+                                <div style="color:#eae4d8; font-weight:600;">{reference_courte}</div>
+                            </div>
+                            <div>
+                                <div style="color:#9a948a; font-size:0.72rem; letter-spacing:1px; text-transform:uppercase;">Client</div>
+                                <div style="color:#eae4d8; font-weight:600;">{html_lib.escape(str(cmd.get('client_nom') or '—'))}</div>
+                            </div>
+                            <div>
+                                <div style="color:#9a948a; font-size:0.72rem; letter-spacing:1px; text-transform:uppercase;">Téléphone</div>
+                                <div style="color:#eae4d8; font-weight:600;">{html_lib.escape(str(cmd.get('tel') or '—'))}</div>
+                            </div>
+                            <div>
+                                <div style="color:#9a948a; font-size:0.72rem; letter-spacing:1px; text-transform:uppercase;">Date</div>
+                                <div style="color:#eae4d8; font-weight:600;">{date_affichee}</div>
+                            </div>
+                            <div>
+                                <div style="color:#9a948a; font-size:0.72rem; letter-spacing:1px; text-transform:uppercase;">Total</div>
+                                <div style="color:#c9a35c; font-weight:700; font-size:1.15rem;">{int(total_cmd)} FCFA</div>
+                            </div>
+                            <div style="padding:6px 14px; border-radius:20px; background:{couleur_statut}; color:#16151a; font-weight:700; font-size:0.8rem; white-space:nowrap;">
+                                {statut_actuel}
+                            </div>
+                        </div>''',
+                        unsafe_allow_html=True
+                    )
+
+                    if articles_cmd:
+                        for art in articles_cmd:
+                            image_art = str(art.get("image") or "")
+                            col_img, col_info = st.columns([1, 5])
+                            with col_img:
+                                if re.match(r"^https?://", image_art.strip(), re.IGNORECASE):
+                                    st.image(image_art, width=64)
+                                else:
+                                    st.caption("🚫")
+                            with col_info:
+                                variante = " / ".join(
+                                    v for v in [art.get("taille"), art.get("couleur")]
+                                    if v and str(v).lower() != "nan"
+                                )
+                                libelle_variante = f" ({variante})" if variante else ""
+                                prix_art = float(art.get("prix") or 0)
+                                qte_art = float(art.get("quantite") or 0)
+                                st.markdown(
+                                    f"**{html_lib.escape(str(art.get('nom', '?')))}**{libelle_variante}  \n"
+                                    f"{int(qte_art)} × {int(prix_art)} FCFA = **{int(prix_art * qte_art)} FCFA**"
+                                )
+                    else:
+                        st.caption("Aucun article enregistré pour cette commande.")
+
+                    st.divider()
                     index_defaut = statuts_possibles.index(statut_actuel) if statut_actuel in statuts_possibles else 0
                     nouveau_statut = st.selectbox(
                         "Statut", statuts_possibles, index=index_defaut, key=f"statut_{cle_unique}"
