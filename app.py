@@ -1191,7 +1191,8 @@ if not mode_admin:
                     resultat = sb.rpc("passer_commande", {
                         "p_client_nom": client_nom.strip(),
                         "p_tel": client_tel.strip(),
-                        "p_articles": articles_payload
+                        "p_articles": articles_payload,
+                        "p_marchand_id": MARCHAND_ID
                     }).execute()
                     donnee = resultat.data or {}
                     envoyer_notification_commande(
