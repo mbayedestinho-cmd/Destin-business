@@ -274,7 +274,8 @@ if "admin_connecte" not in st.session_state:
 #
 # 🔑 Pour définir/réinitialiser le mot de passe admin directement en base
 # (si tu ne connais pas le mot de passe actuel), lance ce script Python en
-# local puis colle le résultat dans la table config (clé "mot_de_passe") :
+# local puis colle le résultat dans la colonne `mot_de_passe_hash` de la
+# ligne correspondante dans la table `marchands` :
 #   import bcrypt; print(bcrypt.hashpw(b"TonNouveauMotDePasse", bcrypt.gensalt(rounds=12)).decode())
 def hash_mot_de_passe(valeur):
     return bcrypt.hashpw(str(valeur or "").encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
@@ -596,8 +597,40 @@ def charger_catalogue(_refresh=0):
 
 @st.cache_data(ttl=20)
 def charger_config(_refresh=0):
-    reponse = sb.table("config").select("*").execute()
-    return {row["cle"]: row["valeur"] for row in reponse.data}
+    # Les réglages spécifiques à CETTE boutique vivent maintenant dans
+    # `marchands` (une ligne par marchand) et non plus dans `config`
+    # (désormais réservée aux clés globales à la marketplace). On garde
+    # les mêmes noms de clés en sortie pour ne rien casser ailleurs dans
+    # le code.
+    reponse = (
+        sb.table("marchands")
+        .select(
+            "nom_boutique, slogan, logo, whatsapp, email_contact, "
+            "seuil_stock_bas, heure_bilan, derniere_alerte_stock_date, "
+            "dernier_bilan_date, mot_de_passe_hash"
+        )
+        .eq("id", MARCHAND_ID)
+        .execute()
+    )
+    if not reponse.data:
+        return {}
+    ligne = reponse.data[0]
+    return {
+        "nom_boutique": ligne.get("nom_boutique"),
+        "slogan": ligne.get("slogan"),
+        "logo": ligne.get("logo"),
+        "whatsapp": ligne.get("whatsapp"),
+        "email_admin": ligne.get("email_contact"),
+        "seuil_stock_bas": ligne.get("seuil_stock_bas"),
+        "heure_bilan": ligne.get("heure_bilan"),
+        "derniere_alerte_stock_date": (
+            str(ligne["derniere_alerte_stock_date"]) if ligne.get("derniere_alerte_stock_date") else None
+        ),
+        "dernier_bilan_date": (
+            str(ligne["dernier_bilan_date"]) if ligne.get("dernier_bilan_date") else None
+        ),
+        "mot_de_passe": ligne.get("mot_de_passe_hash"),
+    }
 
 
 @st.cache_data(ttl=30)
@@ -858,9 +891,9 @@ def verifier_alerte_stock_bas(df_catalogue, config):
 
     if envoyer_email_brut(destinataire, "⚠️ Alerte stock bas", corps):
         try:
-            get_admin_client().table("config").upsert(
-                {"cle": "derniere_alerte_stock_date", "valeur": aujourdhui}
-            ).execute()
+            get_admin_client().table("marchands").update(
+                {"derniere_alerte_stock_date": aujourdhui}
+            ).eq("id", MARCHAND_ID).execute()
         except Exception:
             pass
 
@@ -900,9 +933,9 @@ def verifier_bilan_quotidien(config):
     destinataire = config.get("email_admin") or st.secrets.get("GMAIL_ADDRESS", "")
     if envoyer_email_brut(destinataire, f"📊 Bilan des ventes — {aujourdhui}", corps):
         try:
-            get_admin_client().table("config").upsert(
-                {"cle": "dernier_bilan_date", "valeur": aujourdhui}
-            ).execute()
+            get_admin_client().table("marchands").update(
+                {"dernier_bilan_date": aujourdhui}
+            ).eq("id", MARCHAND_ID).execute()
         except Exception:
             pass
 
@@ -1713,12 +1746,11 @@ else:
                     # logo -- sans que tu saches pourquoi. Le message
                     # d'erreur exact s'affiche maintenant clairement.
                     try:
-                        for cle, valeur in [
-                            ("nom_boutique", nom_boutique_input),
-                            ("slogan", slogan_input),
-                            ("logo", logo_valeur),
-                        ]:
-                            sb_admin.table("config").upsert({"cle": cle, "valeur": valeur}).execute()
+                        sb_admin.table("marchands").update({
+                            "nom_boutique": nom_boutique_input,
+                            "slogan": slogan_input,
+                            "logo": logo_valeur,
+                        }).eq("id", MARCHAND_ID).execute()
                     except Exception:
                         logger.exception("Échec enregistrement identité boutique")
                         st.error("❌ L'enregistrement en base a échoué. Réessaie dans un instant.")
@@ -1756,12 +1788,12 @@ else:
 
                 if st.form_submit_button("Enregistrer"):
                     try:
-                        for cle, valeur in [
-                            ("whatsapp", whatsapp_input), ("email_admin", email_admin_input),
-                            ("seuil_stock_bas", str(int(seuil_stock_input))),
-                            ("heure_bilan", str(int(heure_bilan_input)))
-                        ]:
-                            sb_admin.table("config").upsert({"cle": cle, "valeur": valeur}).execute()
+                        sb_admin.table("marchands").update({
+                            "whatsapp": whatsapp_input,
+                            "email_contact": email_admin_input,
+                            "seuil_stock_bas": int(seuil_stock_input),
+                            "heure_bilan": int(heure_bilan_input),
+                        }).eq("id", MARCHAND_ID).execute()
                     except Exception:
                         logger.exception("Échec enregistrement config contact/alertes")
                         st.error("❌ L'enregistrement en base a échoué. Réessaie dans un instant.")
@@ -1787,9 +1819,9 @@ else:
                     elif mdp_nouveau != mdp_nouveau_confirmation:
                         st.warning("La confirmation ne correspond pas au nouveau mot de passe.")
                     else:
-                        sb_admin.table("config").upsert(
-                            {"cle": "mot_de_passe", "valeur": hash_mot_de_passe(mdp_nouveau)}
-                        ).execute()
+                        sb_admin.table("marchands").update(
+                            {"mot_de_passe_hash": hash_mot_de_passe(mdp_nouveau)}
+                        ).eq("id", MARCHAND_ID).execute()
                         forcer_rafraichissement()
                         st.success("Mot de passe mis à jour avec succès — utilise-le dès ta prochaine connexion.")
 
