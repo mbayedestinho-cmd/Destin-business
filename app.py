@@ -234,33 +234,59 @@ sb = get_public_client()
 
 
 # ====================== 2bis. MARCHAND ACTIF (marketplace) ======================
-# Cette instance de l'app sert une seule boutique pour l'instant. MARCHAND_SLUG
-# identifie laquelle parmi la table `marchands` -- si un jour l'app sert
-# plusieurs boutiques (un déploiement par marchand par ex.), il suffira de
-# faire varier ce secret d'un déploiement à l'autre.
-MARCHAND_SLUG = st.secrets.get("MARCHAND_SLUG", "destiny-luxury")
+# Multi-tenant : UN SEUL déploiement sert toutes les boutiques de la
+# marketplace. Le marchand à afficher est déterminé par le paramètre d'URL
+# ?boutique=<slug>, par exemple :
+#   https://tonapp.streamlit.app/?boutique=bienvenu-boutique
+# (même principe que ?admin=1 utilisé plus bas pour l'accès admin -- les
+# deux peuvent se combiner : ?admin=1&boutique=bienvenu-boutique)
+# Si le paramètre est absent (lien direct sans query string, ex. un ancien
+# favori), on retombe sur le secret MARCHAND_SLUG s'il est défini, sinon sur
+# un slug fixe de secours.
+def determiner_slug_boutique():
+    slug_url = st.query_params.get("boutique")
+    if slug_url:
+        return slug_url
+    return st.secrets.get("MARCHAND_SLUG", "destiny-luxury")
 
 
-@st.cache_resource
-def charger_marchand_id():
-    # Client admin (service_role) utilisé ici volontairement : il bypasse RLS,
+MARCHAND_SLUG = determiner_slug_boutique()
+
+
+@st.cache_data(ttl=60)
+def charger_marchand(slug):
+    # 🔒 FIX MULTI-TENANT : l'ancienne version utilisait @st.cache_resource
+    # SANS paramètre -- en cache-partagé-process, ça figeait le PREMIER
+    # marchand chargé pour TOUS les visiteurs suivants, quel que soit leur
+    # ?boutique=. Le cache est maintenant conditionné au slug (une entrée de
+    # cache par boutique) et se rafraîchit après 60s.
+    #
+    # Client admin (service_role) utilisé volontairement : il bypasse RLS,
     # donc ça marche même si le marchand est suspendu (on veut pouvoir
-    # afficher un message de suspension plutôt que planter silencieusement).
-    reponse = (
-        get_admin_client()
-        .table("marchands")
-        .select("id")
-        .eq("slug", MARCHAND_SLUG)
-        .single()
-        .execute()
-    )
-    if not reponse.data:
-        st.error(f"Marchand introuvable pour le slug '{MARCHAND_SLUG}'.")
-        st.stop()
-    return reponse.data["id"]
+    # afficher un message clair plutôt que planter silencieusement).
+    reponse = get_admin_client().table("marchands").select("*").eq("slug", slug).execute()
+    return reponse.data[0] if reponse.data else None
 
 
-MARCHAND_ID = charger_marchand_id()
+MARCHAND = charger_marchand(MARCHAND_SLUG)
+
+if not MARCHAND:
+    st.error(f"Boutique introuvable pour le lien utilisé (« {MARCHAND_SLUG} »). Vérifie l'URL.")
+    st.stop()
+
+MARCHAND_ID = MARCHAND["id"]
+
+# L'accès n'est ouvert que pour un abonnement actif ou en délai de grâce --
+# voir le commentaire de la table `marchands` dans le schéma SQL.
+if MARCHAND["statut_abonnement"] not in ("actif", "en_grace"):
+    messages_statut = {
+        "en_attente_paiement": "Cette boutique est en cours d'activation et n'est pas encore ouverte au public.",
+        "suspendu": "Cette boutique est temporairement indisponible.",
+        "resilie": "Cette boutique n'est plus disponible.",
+    }
+    st.error(messages_statut.get(MARCHAND["statut_abonnement"], "Cette boutique n'est pas disponible actuellement."))
+    st.stop()
+
 
 if "admin_connecte" not in st.session_state:
     st.session_state.admin_connecte = False
@@ -321,7 +347,7 @@ def admin_login(mot_de_passe):
         restant = int(verrou_jusqu_a - maintenant)
         return False, f"Trop de tentatives échouées. Réessaie dans {restant} seconde(s)."
 
-    config_actuelle = charger_config(st.session_state.refresh_token)
+    config_actuelle = charger_config(MARCHAND_ID, st.session_state.refresh_token)
     hash_attendu = config_actuelle.get("mot_de_passe", "")
     if verifier_mot_de_passe(mot_de_passe, hash_attendu):
         st.session_state.admin_connecte = True
@@ -584,8 +610,8 @@ def jouer_son_ajout():
 
 # ====================== 4. DONNÉES (mise en cache + TTL) ======================
 @st.cache_data(ttl=20)
-def charger_catalogue(_refresh=0):
-    reponse = sb.table("catalogue").select("*").eq("marchand_id", MARCHAND_ID).execute()
+def charger_catalogue(marchand_id, _refresh=0):
+    reponse = sb.table("catalogue").select("*").eq("marchand_id", marchand_id).execute()
     df = pd.DataFrame(reponse.data)
     if df.empty:
         return df
@@ -596,7 +622,7 @@ def charger_catalogue(_refresh=0):
 
 
 @st.cache_data(ttl=20)
-def charger_config(_refresh=0):
+def charger_config(marchand_id, _refresh=0):
     # Les réglages spécifiques à CETTE boutique vivent maintenant dans
     # `marchands` (une ligne par marchand) et non plus dans `config`
     # (désormais réservée aux clés globales à la marketplace). On garde
@@ -609,7 +635,7 @@ def charger_config(_refresh=0):
             "seuil_stock_bas, heure_bilan, derniere_alerte_stock_date, "
             "dernier_bilan_date, mot_de_passe_hash"
         )
-        .eq("id", MARCHAND_ID)
+        .eq("id", marchand_id)
         .execute()
     )
     if not reponse.data:
@@ -634,14 +660,14 @@ def charger_config(_refresh=0):
 
 
 @st.cache_data(ttl=30)
-def charger_tous_avis_approuves(_refresh=0):
+def charger_tous_avis_approuves(marchand_id, _refresh=0):
     """Un SEUL appel réseau vers Supabase pour récupérer tous les avis
     approuvés. Avant, chaque produit de la grille refaisait ce même appel
     (SELECT * sur toute la table) rien que pour filtrer différemment en
     Python ensuite -- avec 12 produits sur la page, ça faisait 12
     aller-retours réseau redondants, une cause majeure de latence perçue
     (surtout en mobile où chaque round-trip pèse plus lourd)."""
-    reponse = sb.table("avis").select("*").eq("statut", "approuve").eq("marchand_id", MARCHAND_ID).execute()
+    reponse = sb.table("avis").select("*").eq("statut", "approuve").eq("marchand_id", marchand_id).execute()
     return reponse.data
 
 
@@ -660,9 +686,9 @@ def indexer_avis_par_article(tous_avis):
 
 
 @st.cache_data(ttl=30)
-def charger_avis_moyennes(_refresh=0):
+def charger_avis_moyennes(marchand_id, _refresh=0):
     par_article = {}
-    for row in charger_tous_avis_approuves(_refresh):
+    for row in charger_tous_avis_approuves(marchand_id, _refresh):
         cle_id = normaliser(row.get("article_id"))
         cle_nom = normaliser(row.get("article_nom"))
         for cle in {c for c in [cle_id, cle_nom] if c}:
@@ -777,7 +803,10 @@ def marquer_panier_converti(tel):
 
 # ====================== 6. EMAIL (Gmail SMTP, avec repli journalisé) ======================
 def envoyer_notification_commande(id_commande, client_nom, tel, articles, total, introuvables):
-    corps = "Nouvelle commande reçue sur Destiny Luxury Collection !\n\n"
+    nom_boutique_actuel = charger_config(MARCHAND_ID, st.session_state.refresh_token).get(
+        "nom_boutique", "notre boutique"
+    )
+    corps = f"Nouvelle commande reçue sur {nom_boutique_actuel} !\n\n"
     corps += f"Référence : {id_commande}\n"
     corps += f"Client : {client_nom}\nTéléphone : {tel}\n\nArticles :\n"
     for a in articles:
@@ -789,7 +818,7 @@ def envoyer_notification_commande(id_commande, client_nom, tel, articles, total,
     envoye = False
     if EMAIL_ACTIVE:
         try:
-            config = charger_config(st.session_state.refresh_token)
+            config = charger_config(MARCHAND_ID, st.session_state.refresh_token)
             destinataire = config.get("email_admin") or st.secrets["GMAIL_ADDRESS"]
             msg = MIMEText(corps, "plain", "utf-8")
             msg["Subject"] = f"Nouvelle commande — {total} FCFA"
@@ -853,7 +882,7 @@ def notifier_retour_stock(nom_article):
         )
     except Exception:
         return
-    nom_boutique_actuel = charger_config(st.session_state.refresh_token).get("nom_boutique", "notre boutique")
+    nom_boutique_actuel = charger_config(MARCHAND_ID, st.session_state.refresh_token).get("nom_boutique", "notre boutique")
     for alerte in (reponse.data or []):
         if alerte.get("contact_type") == "email":
             corps = (
@@ -941,10 +970,10 @@ def verifier_bilan_quotidien(config):
 
 
 # ====================== 7. INTERFACE PUBLIQUE ======================
-config = charger_config(st.session_state.refresh_token)
-df_catalogue = charger_catalogue(st.session_state.refresh_token)
-avis_moyennes = charger_avis_moyennes(st.session_state.refresh_token)
-avis_par_article = indexer_avis_par_article(charger_tous_avis_approuves(st.session_state.refresh_token))
+config = charger_config(MARCHAND_ID, st.session_state.refresh_token)
+df_catalogue = charger_catalogue(MARCHAND_ID, st.session_state.refresh_token)
+avis_moyennes = charger_avis_moyennes(MARCHAND_ID, st.session_state.refresh_token)
+avis_par_article = indexer_avis_par_article(charger_tous_avis_approuves(MARCHAND_ID, st.session_state.refresh_token))
 
 # 🔔 Vérifications silencieuses (n'affichent rien, ne bloquent jamais la
 # page) -- envoient au plus un email par jour chacune, dès que quelqu'un
