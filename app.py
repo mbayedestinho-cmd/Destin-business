@@ -577,7 +577,7 @@ else:
 
                         if st.form_submit_button("Enregistrer", disabled=id_manquant):
                             maj = {
-                                "nom": nouveau_nom, "prix": nouveau_prix, "stock": nouveau_stock,
+                                "nom": nouveau_nom, "prix": int(nouveau_prix), "stock": nouveau_stock,
                                 "categorie": nouvelle_categorie, "tailles": nouvelles_tailles,
                                 "couleurs": nouvelles_couleurs
                             }
@@ -628,7 +628,7 @@ else:
                                 urls_supp.append(url)
                         sb_admin.table("catalogue").insert({
                             "id": str(uuid.uuid4()),
-                            "nom": nom, "prix": prix, "stock": stock,
+                            "nom": nom, "prix": int(prix), "stock": stock,
                             "image": url_principale, "images_supplementaires": ", ".join(urls_supp),
                             "categorie": categorie, "tailles": tailles, "couleurs": couleurs,
                             "date_ajout": datetime.now(timezone.utc).isoformat()
@@ -752,4 +752,4 @@ else:
                         st.link_button("💬 Relancer sur WhatsApp", lien_whatsapp)
                     if st.button("🗑️ Marquer comme traité", key=f"panier_traite_{cle_unique}"):
                         sb_admin.table("paniersabandonnés").update({"statut": "traite"}).eq("telephone", panier["telephone"]).execute()
-                        st.rerun()
+                        st.rerun(
