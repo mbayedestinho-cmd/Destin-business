@@ -340,6 +340,38 @@ def afficher_galerie_swipe(images, hauteur=280, cle=""):
     components.html(code_html, height=hauteur + 26, scrolling=False)
 
 
+def jouer_son_ajout():
+    """Joue un petit carillon raffiné (généré à la volée, aucun fichier audio
+    nécessaire) au moment où un article est ajouté au panier. Certains
+    navigateurs mobiles bloquent l'audio automatique par défaut -- c'est une
+    politique du navigateur, pas un bug de l'application."""
+    components.html(
+        """
+        <script>
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const jouerNote = (freq, debut, duree, volume) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = "sine";
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0, ctx.currentTime + debut);
+                gain.gain.linearRampToValueAtTime(volume, ctx.currentTime + debut + 0.01);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + debut + duree);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(ctx.currentTime + debut);
+                osc.stop(ctx.currentTime + debut + duree);
+            };
+            jouerNote(880.0, 0, 0.12, 0.15);
+            jouerNote(1318.5, 0.09, 0.2, 0.12);
+        } catch (e) {}
+        </script>
+        """,
+        height=0
+    )
+
+
 # ====================== 4. DONNÉES (mise en cache + TTL) ======================
 @st.cache_data(ttl=60)
 def charger_catalogue(_refresh=0):
@@ -748,6 +780,8 @@ if not mode_admin:
                                     "couleur": couleur_choisie,
                                     "quantite": 1
                                 })
+                            jouer_son_ajout()
+                            st.toast(f"{row['nom']} ajouté au panier !", icon="🛍️")
                             st.rerun()
 
                     with st.expander("💬 Avis clients"):
