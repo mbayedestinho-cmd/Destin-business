@@ -1432,19 +1432,31 @@ if not mode_admin:
                                     # n'apparaissait jamais dans l'onglet Avis de l'admin
                                     # (qui filtre par marchand_id). Voir aussi la fonction
                                     # SQL "laisser_avis" à mettre à jour en conséquence.
-                                    resultat = sb.rpc("laisser_avis", {
-                                        "p_article_id": identifiant_produit,
-                                        "p_article_nom": str(row["nom"]),
-                                        "p_client_nom": nom_avis.strip(),
-                                        "p_note": int(note_avis),
-                                        "p_commentaire": commentaire_avis.strip(),
-                                        "p_marchand_id": MARCHAND_ID
-                                    }).execute()
-                                    donnee = resultat.data or {}
-                                    if donnee.get("status") == "success":
-                                        st.success(donnee.get("message"))
+                                    #
+                                    # 🐛 CORRECTIF 2 : le try/except manquait ici -- c'était
+                                    # le seul appel RPC d'écriture du fichier sans gestion
+                                    # d'erreur. Une panne côté fonction SQL (ex: contrainte
+                                    # NOT NULL sur "id") remontait donc comme une exception
+                                    # non interceptée -- rien d'affiché au client, tout part
+                                    # uniquement dans les logs serveur.
+                                    try:
+                                        resultat = sb.rpc("laisser_avis", {
+                                            "p_article_id": identifiant_produit,
+                                            "p_article_nom": str(row["nom"]),
+                                            "p_client_nom": nom_avis.strip(),
+                                            "p_note": int(note_avis),
+                                            "p_commentaire": commentaire_avis.strip(),
+                                            "p_marchand_id": MARCHAND_ID
+                                        }).execute()
+                                    except Exception:
+                                        logger.exception("Échec envoi avis")
+                                        st.error("❌ L'envoi de l'avis a échoué. Réessaie dans un instant.")
                                     else:
-                                        st.error(donnee.get("message", "Erreur lors de l'envoi"))
+                                        donnee = resultat.data or {}
+                                        if donnee.get("status") == "success":
+                                            st.success(donnee.get("message"))
+                                        else:
+                                            st.error(donnee.get("message", "Erreur lors de l'envoi"))
 
     # 👑 Club VIP (module Aura Luxe, premium uniquement) -- un visiteur peut
     # vérifier lui-même s'il fait partie du club en tapant son numéro. Le
@@ -1950,6 +1962,7 @@ else:
                         st.rerun()
 
         with tab_avis:
+            st.markdown("#### 🕓 En attente de validation")
             reponse = sb_admin.table("avis").select("*").eq("statut", "en_attente").eq("marchand_id", MARCHAND_ID).execute()
             if not reponse.data:
                 st.caption("Aucun avis en attente")
@@ -1963,6 +1976,32 @@ else:
                         forcer_rafraichissement()
                         st.rerun()
                     if col2.button("🗑️ Supprimer", key=f"suppr_avis_{cle_unique}"):
+                        sb_admin.table("avis").delete().eq("id", avis_item["id"]).execute()
+                        forcer_rafraichissement()
+                        st.rerun()
+
+            st.divider()
+            # 🐛 CORRECTIF : les avis approuvés n'apparaissaient nulle part côté
+            # admin (la requête ci-dessus ne charge que statut="en_attente"), donc
+            # une fois publiés sous l'article, il n'y avait plus aucun moyen de les
+            # supprimer. Cette section liste les avis publiés avec un bouton
+            # suppression dédié.
+            st.markdown("#### ✅ Avis publiés")
+            reponse_publies = (
+                sb_admin.table("avis")
+                .select("*")
+                .eq("statut", "approuve")
+                .eq("marchand_id", MARCHAND_ID)
+                .order("date", desc=True)
+                .execute()
+            )
+            if not reponse_publies.data:
+                st.caption("Aucun avis publié pour le moment")
+            for idx, avis_item in enumerate(reponse_publies.data):
+                cle_unique = f"pub_{idx}_{avis_item.get('id') or 'sansid'}"
+                with st.expander(f"{avis_item['client_nom']} — {avis_item['article_nom']} — {'⭐' * int(avis_item['note'])}"):
+                    st.write(avis_item.get("commentaire") or "(pas de commentaire)")
+                    if st.button("🗑️ Supprimer", key=f"suppr_avis_{cle_unique}"):
                         sb_admin.table("avis").delete().eq("id", avis_item["id"]).execute()
                         forcer_rafraichissement()
                         st.rerun()
