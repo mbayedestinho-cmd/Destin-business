@@ -660,6 +660,64 @@ def afficher_galerie_swipe(images, hauteur=280, cle=""):
     components.html(code_html, height=hauteur + 26, scrolling=False)
 
 
+def bouton_partager(titre_produit, texte_partage, slug_boutique, produit_id, cle=""):
+    """Bouton « Partager » : ouvre le partage natif du téléphone (WhatsApp,
+    SMS, etc. via l'API navigator.share) avec le lien de la boutique et de
+    l'article. Sur un ordinateur (pas de partage natif), le lien est copié
+    dans le presse-papier -- avec un repli sur une fenêtre "copier ce lien"
+    si le presse-papier est bloqué par le navigateur."""
+    id_bouton = f"dlc-partage-{re.sub(r'[^a-zA-Z0-9_-]', '', str(cle))}"
+    titre_js = json.dumps(str(titre_produit))
+    texte_js = json.dumps(str(texte_partage))
+    slug_js = json.dumps(str(slug_boutique))
+    produit_js = json.dumps(str(produit_id))
+    code_html = f"""
+    <button id="{id_bouton}" class="dlc-btn-partage">🔗 Partager</button>
+    <style>
+      .dlc-btn-partage {{
+        width:100%; padding:0.45rem 0.6rem; border-radius:8px;
+        border:1px solid #c9a35c; background:transparent; color:#c9a35c;
+        font-family:'Inter',sans-serif; font-weight:500; font-size:0.95rem;
+        cursor:pointer; transition:all 0.2s ease; white-space:nowrap;
+      }}
+      .dlc-btn-partage:hover {{ background:#c9a35c; color:#16151a; }}
+    </style>
+    <script>
+      (function() {{
+        const bouton = document.getElementById("{id_bouton}");
+        bouton.addEventListener("click", async function() {{
+          let lien;
+          try {{
+            const url = new URL(window.top.location.href);
+            url.searchParams.set("boutique", {slug_js});
+            url.searchParams.set("produit", {produit_js});
+            lien = url.toString();
+          }} catch (e) {{
+            lien = window.location.href;
+          }}
+          const donnees = {{ title: {titre_js}, text: {texte_js}, url: lien }};
+          try {{
+            if (navigator.share) {{
+              await navigator.share(donnees);
+              return;
+            }}
+            throw new Error("partage natif indisponible");
+          }} catch (e) {{
+            try {{
+              await navigator.clipboard.writeText(lien);
+              bouton.textContent = "✅ Lien copié !";
+              setTimeout(() => {{ bouton.textContent = "🔗 Partager"; }}, 2000);
+            }} catch (e2) {{
+              window.prompt("Copie ce lien pour le partager :", lien);
+            }}
+          }}
+        }});
+      }})();
+    </script>
+    """
+    components.html(code_html, height=46, scrolling=False)
+
+
 def afficher_hero(logo_url, titre, sous_titre=""):
     """Affiche le bandeau logo + effet lumineux doré en arrière-plan, avec un
     titre (ex: nom de la boutique, ou message de bienvenue) et un sous-titre
@@ -774,6 +832,21 @@ def synchroniser_panier_url():
             del st.query_params["panier"]
     except Exception:
         pass  # la persistance du panier est un bonus, jamais bloquant
+
+
+# ====================== 4ter. FAVORIS PERSISTANTS ======================
+# Même principe que le panier ci-dessus : la liste de favoris (identifiants
+# d'articles) vit dans st.session_state et est dupliquée dans l'URL
+# (?favoris=...) pour survivre à un redéploiement ou une coupure réseau, sans
+# nécessiter de compte client.
+def synchroniser_favoris_url():
+    try:
+        if st.session_state.favoris:
+            st.query_params["favoris"] = json.dumps(st.session_state.favoris, separators=(",", ":"))
+        elif "favoris" in st.query_params:
+            del st.query_params["favoris"]
+    except Exception:
+        pass  # la persistance des favoris est un bonus, jamais bloquant
 
 
 def jouer_son_ajout():
@@ -1041,6 +1114,18 @@ if "cart" not in st.session_state:
             panier_restaure = json.loads(panier_url)
             if isinstance(panier_restaure, list):
                 st.session_state.cart = panier_restaure
+        except Exception:
+            pass
+if "favoris" not in st.session_state:
+    st.session_state.favoris = []
+    # 🔄 Restauration des favoris depuis l'URL (voir synchroniser_favoris_url
+    # ci-dessus), même logique que pour le panier.
+    favoris_url = st.query_params.get("favoris")
+    if favoris_url:
+        try:
+            favoris_restaures = json.loads(favoris_url)
+            if isinstance(favoris_restaures, list):
+                st.session_state.favoris = favoris_restaures
         except Exception:
             pass
 if "dernier_panier_signature" not in st.session_state:
@@ -1369,11 +1454,26 @@ if not mode_admin:
             categories = ["Toutes"] + sorted(df_catalogue["categorie"].dropna().unique().tolist())
             categorie_choisie = st.selectbox("Catégorie", categories)
 
+            # ❤️ Favoris -- permet au client de retrouver en un clic les
+            # articles qu'il a marqués comme favoris, sans avoir à les
+            # rechercher dans tout le catalogue.
+            favoris_uniquement = st.checkbox(
+                f"❤️ Afficher uniquement mes favoris ({len(st.session_state.favoris)})",
+                disabled=not st.session_state.favoris
+            )
+
             df_affiche = df_catalogue.copy()
             if recherche:
                 df_affiche = df_affiche[df_affiche["nom"].str.contains(recherche, case=False, na=False)]
             if categorie_choisie != "Toutes":
                 df_affiche = df_affiche[df_affiche["categorie"] == categorie_choisie]
+            if favoris_uniquement:
+                df_affiche = df_affiche[
+                    df_affiche.apply(
+                        lambda r: normaliser(r.get("id") or r.get("nom")) in st.session_state.favoris,
+                        axis=1
+                    )
+                ]
 
             # ⭐ Collections temporaires (module Aura Luxe, premium uniquement)
             # -- une collection expirée disparaît automatiquement du filtre,
@@ -1441,8 +1541,29 @@ if not mode_admin:
                     else:
                         st.markdown(f'<span class="destiny-prix-normal">{int(prix)} FCFA</span>', unsafe_allow_html=True)
 
+                    # ❤️ Favoris -- disponible même en rupture de stock, pour
+                    # que le client puisse quand même sauvegarder l'article et
+                    # le retrouver facilement plus tard (voir le filtre
+                    # "Afficher uniquement mes favoris" au-dessus de la grille).
+                    est_favori = identifiant_produit in st.session_state.favoris
+                    if st.button(
+                        "❤️ Retirer des favoris" if est_favori else "🤍 Ajouter aux favoris",
+                        key=f"favori_{idx}"
+                    ):
+                        if est_favori:
+                            st.session_state.favoris.remove(identifiant_produit)
+                        else:
+                            st.session_state.favoris.append(identifiant_produit)
+                        synchroniser_favoris_url()
+                        st.rerun()
+
                     if en_rupture:
                         st.error("Rupture de stock")
+                        bouton_partager(
+                            str(row["nom"]),
+                            f"Découvre {row['nom']} chez {NOM_BOUTIQUE}",
+                            MARCHAND_SLUG, identifiant_produit, cle=f"partage_{idx}"
+                        )
                         with st.expander("🔔 Me prévenir quand disponible"):
                             nom_alerte = st.text_input("Votre nom", key=f"alerte_nom_{idx}")
                             contact = st.text_input("Email ou téléphone", key=f"alerte_{idx}")
@@ -1475,29 +1596,38 @@ if not mode_admin:
                         taille_choisie = st.selectbox("Taille", options_taille, key=f"taille_{idx}") if options_taille else ""
                         couleur_choisie = st.selectbox("Couleur", options_couleur, key=f"couleur_{idx}") if options_couleur else ""
 
-                        if st.button("🛒 Ajouter au panier", key=f"add_{idx}"):
-                            existant = next(
-                                (a for a in st.session_state.cart
-                                 if a["nom"] == row["nom"] and a.get("taille") == taille_choisie
-                                 and a.get("couleur") == couleur_choisie),
-                                None
+                        col_panier, col_partager = st.columns([3, 1])
+                        with col_panier:
+                            if st.button("🛒 Ajouter au panier", key=f"add_{idx}"):
+                                existant = next(
+                                    (a for a in st.session_state.cart
+                                     if a["nom"] == row["nom"] and a.get("taille") == taille_choisie
+                                     and a.get("couleur") == couleur_choisie),
+                                    None
+                                )
+                                if existant:
+                                    existant["quantite"] += 1
+                                else:
+                                    st.session_state.cart.append({
+                                        "produit_id": str(row.get("id") or ""),
+                                        "nom": row["nom"],
+                                        "prix": float(prix_promo if en_promo else prix),
+                                        "taille": taille_choisie,
+                                        "couleur": couleur_choisie,
+                                        "quantite": 1
+                                    })
+                                st.session_state.message_toast = f"{nom_affiche} ajouté au panier !"
+                                st.session_state.icone_toast = "🛍️"
+                                st.session_state.jouer_son = True
+                                synchroniser_panier_url()
+                                st.rerun()
+                        with col_partager:
+                            bouton_partager(
+                                str(row["nom"]),
+                                f"Découvre {row['nom']} chez {NOM_BOUTIQUE} — "
+                                f"{int(prix_promo if en_promo else prix)} FCFA",
+                                MARCHAND_SLUG, identifiant_produit, cle=f"partage_{idx}"
                             )
-                            if existant:
-                                existant["quantite"] += 1
-                            else:
-                                st.session_state.cart.append({
-                                    "produit_id": str(row.get("id") or ""),
-                                    "nom": row["nom"],
-                                    "prix": float(prix_promo if en_promo else prix),
-                                    "taille": taille_choisie,
-                                    "couleur": couleur_choisie,
-                                    "quantite": 1
-                                })
-                            st.session_state.message_toast = f"{nom_affiche} ajouté au panier !"
-                            st.session_state.icone_toast = "🛍️"
-                            st.session_state.jouer_son = True
-                            synchroniser_panier_url()
-                            st.rerun()
 
                     with st.expander("💬 Avis clients"):
                         for avis_item in avis_par_article.get(identifiant_produit, [])[:20]:
@@ -1653,6 +1783,29 @@ if not mode_admin:
                     st.success(f"Commande {donnee.get('id_commande')} enregistrée ! Total : {int(donnee.get('total', 0))} FCFA")
                     if donnee.get("ruptures"):
                         st.warning(f"Stock épuisé pour : {', '.join(donnee['ruptures'])}")
+
+        # ❤️ Mes favoris -- toujours visible dans la sidebar, pour que le
+        # client retrouve en un coup d'œil les articles qu'il a marqués,
+        # sans avoir à refaire défiler tout le catalogue.
+        st.divider()
+        st.subheader("❤️ Mes favoris")
+        if not st.session_state.favoris:
+            st.caption("Aucun favori pour le moment.")
+        else:
+            articles_favoris = df_catalogue[
+                df_catalogue.apply(
+                    lambda r: normaliser(r.get("id") or r.get("nom")) in st.session_state.favoris,
+                    axis=1
+                )
+            ]
+            for _, art_favori in articles_favoris.iterrows():
+                id_favori = normaliser(art_favori.get("id") or art_favori.get("nom"))
+                col_nom_favori, col_suppr_favori = st.columns([3, 1])
+                col_nom_favori.write(f"❤️ {art_favori['nom']} — {int(art_favori.get('prix') or 0)} FCFA")
+                if col_suppr_favori.button("🗑️", key=f"suppr_favori_{id_favori}"):
+                    st.session_state.favoris.remove(id_favori)
+                    synchroniser_favoris_url()
+                    st.rerun()
 
         # 🆕 Suivi de commande -- un client peut retrouver le statut de sa
         # commande avec son numéro de téléphone, sans avoir besoin de compte.
