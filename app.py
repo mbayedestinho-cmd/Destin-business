@@ -384,6 +384,31 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# 🐛 CORRECTIF 3 : "position: fixed" ne couvre pas forcément tout l'écran --
+# si un conteneur parent (ici, le conteneur central de mise en page de
+# Streamlit) applique un CSS transform, TOUS ses enfants en position fixed
+# se retrouvent "emprisonnés" dans ses limites au lieu de couvrir tout
+# l'écran (la barre latérale restait visible et cliquer dessus ne faisait
+# rien, puisque le calque n'y était tout simplement pas). On déplace donc
+# l'élément pour qu'il devienne un enfant direct de <body>, hors de portée
+# de ce piège -- exécuté via un composant iframe (contrairement à
+# st.markdown, un <script> y fonctionne réellement) qui accède au document
+# principal via window.parent, déjà confirmé accessible plus haut.
+components.html(
+    """
+    <script>
+    try {
+        var doc = window.parent.document;
+        var el = doc.getElementById('dlc-lightbox');
+        if (el && el.parentElement !== doc.body) {
+            doc.body.appendChild(el);
+        }
+    } catch (e) {}
+    </script>
+    """,
+    height=0,
+)
+
 # ====================== 1. SECRETS ======================
 # 🔒 FIX : après un très long aller-retour infructueux avec Supabase Auth
 # (confirmation d'email, CAPTCHA, providers...), on repart sur le système
