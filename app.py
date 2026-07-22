@@ -334,80 +334,21 @@ st.markdown("""
         border-radius: 20px;
         font-size: 0.87rem;
     }
-
-    /* 🔍 Lightbox plein écran (zoom image produit) -- voir
-       injecter_lightbox_global() plus bas pour le HTML/JS associé. */
-    #dlc-lightbox {
-        display: none; position: fixed; inset: 0; z-index: 9999;
-        background: rgba(8,8,10,0.94);
-        align-items: center; justify-content: center;
-        padding: 24px; box-sizing: border-box;
-        cursor: zoom-out;
-    }
-    #dlc-lightbox.dlc-visible { display: flex; }
-    #dlc-lightbox img {
-        max-width: 100%; max-height: 100%; border-radius: 10px;
-        box-shadow: 0 8px 40px rgba(0,0,0,0.6);
-        cursor: zoom-out;
-    }
-    #dlc-lightbox .dlc-fermer {
-        position: fixed; top: 18px; right: 22px;
-        color: #eae4d8; font-size: 2rem; line-height: 1; cursor: pointer;
-        background: rgba(0,0,0,0.4); border-radius: 50%;
-        width: 42px; height: 42px; display: flex; align-items: center; justify-content: center;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-# 🔍 Overlay du lightbox -- un seul par page, réutilisé par toutes les
-# images produit. Toutes les photos (galerie ou photo unique) sont
-# maintenant rendues via le même composant iframe (afficher_galerie_swipe)
-# dont le clic manipule directement window.parent.document pour afficher
-# cet overlay -- voir JS_OUVRIR_LIGHTBOX plus bas pour le détail.
-# 🐛 CORRECTIF 1 : la version précédente ajoutait aussi un <script> ici pour
-# écouter des postMessage -- mais un <script> inséré via st.markdown()
-# (donc via innerHTML) ne s'exécute JAMAIS dans un navigateur, c'est une
-# limitation connue du DOM, pas de Streamlit. Résultat : le zoom ne
-# s'ouvrait jamais, ni sur mobile ni sur ordinateur (seul le curseur
-# "zoom-in" du CSS, lui, s'appliquait bien). On manipule maintenant le DOM
-# directement au clic, sans dépendre d'un script qui ne tournait pas.
-# 🐛 CORRECTIF 2 : la photo elle-même bloquait la fermeture (stopPropagation)
-# -- un tap dessus, très naturel pour "revenir en arrière", ne faisait
-# donc rien. On tape maintenant N'IMPORTE OÙ (photo comprise) pour fermer.
-st.markdown(
-    """
-    <div id="dlc-lightbox" onclick="this.classList.remove('dlc-visible')">
-        <span class="dlc-fermer">✕</span>
-        <img id="dlc-lightbox-img" src="">
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-# 🐛 CORRECTIF 3 : "position: fixed" ne couvre pas forcément tout l'écran --
-# si un conteneur parent (ici, le conteneur central de mise en page de
-# Streamlit) applique un CSS transform, TOUS ses enfants en position fixed
-# se retrouvent "emprisonnés" dans ses limites au lieu de couvrir tout
-# l'écran (la barre latérale restait visible et cliquer dessus ne faisait
-# rien, puisque le calque n'y était tout simplement pas). On déplace donc
-# l'élément pour qu'il devienne un enfant direct de <body>, hors de portée
-# de ce piège -- exécuté via un composant iframe (contrairement à
-# st.markdown, un <script> y fonctionne réellement) qui accède au document
-# principal via window.parent, déjà confirmé accessible plus haut.
-components.html(
-    """
-    <script>
-    try {
-        var doc = window.parent.document;
-        var el = doc.getElementById('dlc-lightbox');
-        if (el && el.parentElement !== doc.body) {
-            doc.body.appendChild(el);
-        }
-    } catch (e) {}
-    </script>
-    """,
-    height=0,
-)
+# ====================== 3bis. ZOOM IMAGE PRODUIT ======================
+# 🐛 HISTORIQUE : un calque de zoom "maison" (lightbox en plein écran dans
+# la page) a été tenté ici, mais s'est heurté à plusieurs pièges CSS/DOM
+# propres à Streamlit (position:fixed emprisonné par un conteneur parent,
+# scripts inertes selon comment ils sont injectés, cadres imbriqués...) --
+# après plusieurs correctifs infructueux, on abandonne cette approche.
+# Un clic sur une photo produit ouvre maintenant simplement l'image en
+# pleine résolution dans un NOUVEL ONGLET : le zoom natif du téléphone/
+# navigateur prend le relais, et se referme avec le geste "retour" habituel
+# -- zéro dépendance aux subtilités de mise en page de Streamlit, garanti
+# de fonctionner sur n'importe quel navigateur. Voir JS_OUVRIR_LIGHTBOX
+# plus bas (nom conservé pour ne pas casser les appels existants).
 
 # ====================== 1. SECRETS ======================
 # 🔒 FIX : après un très long aller-retour infructueux avec Supabase Auth
@@ -818,17 +759,13 @@ def televerser_image_imgbb(fichier):
 
 
 # ====================== 3bis. GALERIE PHOTOS AVEC GLISSEMENT (SWIPE) ======================
-# 🐛 CORRECTIF ZOOM : on manipule directement le DOM du lightbox global
-# (window.parent.document, qui est le document iframe-hôte ou la page
-# elle-même selon l'appelant) au lieu de passer par un postMessage dont
-# l'écouteur ne s'exécutait jamais. Constante partagée pour ne pas dupliquer
-# ce bout de JS entre la photo unique et la galerie.
+# 🐛 Après plusieurs correctifs infructueux sur un calque de zoom "maison"
+# (voir historique plus haut dans le fichier), on ouvre simplement l'image
+# en pleine résolution dans un nouvel onglet -- fiable partout, sans aucune
+# dépendance aux subtilités de mise en page de Streamlit.
 JS_OUVRIR_LIGHTBOX = (
-    "try {"
-    "var l=window.parent.document;"
-    "l.getElementById('dlc-lightbox-img').src=this.src;"
-    "l.getElementById('dlc-lightbox').classList.add('dlc-visible');"
-    "} catch(e) { window.open(this.src, '_blank'); }"
+    "try { window.parent.open(this.src, '_blank'); }"
+    "catch(e) { window.location.href = this.src; }"
 )
 
 
