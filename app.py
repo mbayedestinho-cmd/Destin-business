@@ -887,7 +887,7 @@ def afficher_badge_aura():
     st.markdown('<span class="aura-badge">✨ Aura Luxe</span>', unsafe_allow_html=True)
 
 
-
+def boutique_premium(config: dict) -> bool:
     """La boutique a-t-elle le module Marketing & Pub débloqué ? Ce champ
     n'est modifiable QUE depuis le Super Admin (côté marchand, aucun bouton
     ne permet de le changer) -- c'est ce qui garantit que le module reste
