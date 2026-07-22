@@ -227,6 +227,113 @@ st.markdown("""
         margin-top: 0.5rem;
         position: relative; z-index: 1;
     }
+
+    /* Boutons-liens (st.link_button) -- alignés sur le même style doré que
+       les st.button classiques ci-dessus (auparavant non stylés). */
+    div[data-testid="stLinkButton"] a {
+        border-radius: 8px;
+        border: 1px solid var(--aura-accent);
+        color: var(--aura-accent) !important;
+        background: transparent;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        text-decoration: none;
+    }
+    div[data-testid="stLinkButton"] a:hover {
+        background: var(--aura-accent);
+        color: #16151a !important;
+        border-color: var(--aura-accent);
+    }
+
+    /* ====================== SIDEBAR — PANNEAU DE BORD ====================== */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(165deg, #131218 0%, #19171c 55%, #131218 100%);
+        border-right: 1px solid rgba(201,163,92,0.22);
+        position: relative;
+    }
+    /* Faisceau doré qui balaie le bord droit de la sidebar en continu --
+       signature "panneau de contrôle", dans le même doré que le hero et les
+       badges Aura Luxe (aucune couleur étrangère à l'identité de la boutique). */
+    section[data-testid="stSidebar"]::after {
+        content: "";
+        position: absolute;
+        top: -160px; right: -1px;
+        width: 2px; height: 160px;
+        background: linear-gradient(180deg, transparent, var(--aura-accent-clair), transparent);
+        animation: dlc-balayage 6s ease-in-out infinite;
+        pointer-events: none;
+        opacity: 0.85;
+    }
+    @keyframes dlc-balayage {
+        0%   { top: -160px; }
+        100% { top: 100%; }
+    }
+
+    /* Bandeau "Espace client" en tête de sidebar */
+    .dlc-sidebar-masthead {
+        display: flex; align-items: center; gap: 8px;
+        margin: -0.5rem 0 1.1rem 0; padding-bottom: 0.7rem;
+        border-bottom: 1px solid rgba(201,163,92,0.25);
+    }
+    .dlc-sidebar-masthead .dlc-dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--aura-accent);
+        box-shadow: 0 0 8px var(--aura-accent);
+        animation: dlc-pulse-dot 2s ease-in-out infinite;
+    }
+    @keyframes dlc-pulse-dot {
+        0%, 100% { opacity: 0.4; } 50% { opacity: 1; }
+    }
+    .dlc-sidebar-masthead .dlc-masthead-texte {
+        text-transform: uppercase; letter-spacing: 2.5px; font-size: 0.68rem;
+        color: rgba(201,163,92,0.85); font-weight: 600;
+    }
+
+    /* Panneaux (Panier / Favoris / Suivi / Contact) -- verre dépoli discret,
+       liseré doré qui se réveille au survol. */
+    section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"],
+    section[data-testid="stSidebar"] div[data-testid="stExpander"] {
+        background: linear-gradient(160deg, rgba(255,255,255,0.035), rgba(255,255,255,0.008)) !important;
+        border: 1px solid rgba(201,163,92,0.22) !important;
+        border-radius: 14px !important;
+        box-shadow: 0 4px 18px rgba(0,0,0,0.35);
+        margin-bottom: 14px;
+        transition: border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"]:hover,
+    section[data-testid="stSidebar"] div[data-testid="stExpander"]:hover {
+        border-color: rgba(201,163,92,0.55) !important;
+        box-shadow: 0 4px 22px rgba(0,0,0,0.4), 0 0 16px rgba(201,163,92,0.16);
+    }
+    section[data-testid="stSidebar"] div[data-testid="stExpander"] summary {
+        font-family: 'Playfair Display', serif; font-weight: 700; color: #eae4d8;
+    }
+
+    /* En-tête interne d'un panneau : badge icône rond + eyebrow + titre */
+    .dlc-panel-eyebrow {
+        text-transform: uppercase; letter-spacing: 2px; font-size: 0.62rem;
+        color: rgba(201,163,92,0.75); font-weight: 600; margin: 0 0 3px 46px;
+    }
+    .dlc-panel-entete {
+        display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
+    }
+    .dlc-panel-icone {
+        display: flex; align-items: center; justify-content: center;
+        width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+        background: linear-gradient(135deg, rgba(201,163,92,0.25), rgba(201,163,92,0.05));
+        border: 1px solid rgba(201,163,92,0.45);
+        font-size: 1rem;
+    }
+    .dlc-panel-titre {
+        font-family: 'Playfair Display', serif; font-size: 1.05rem; font-weight: 700;
+        color: #eae4d8; letter-spacing: 0.2px;
+    }
+
+    /* Boutons de la sidebar : pilule, cohérente avec l'esthétique "panneau" */
+    section[data-testid="stSidebar"] .stButton > button {
+        border-radius: 20px;
+        font-size: 0.87rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -716,6 +823,20 @@ def bouton_partager(titre_produit, texte_partage, slug_boutique, produit_id, cle
     </script>
     """
     components.html(code_html, height=46, scrolling=False)
+
+
+def entete_panneau_sidebar(icone, titre, eyebrow):
+    """En-tête d'un « panneau » de la sidebar (Panier, Favoris, Contact...) :
+    badge icône rond doré + petit label capitalisé (eyebrow) + titre en
+    Playfair Display, pour un rendu panneau de bord cohérent avec le hero."""
+    st.markdown(
+        f'<div class="dlc-panel-eyebrow">{html_lib.escape(str(eyebrow))}</div>'
+        f'<div class="dlc-panel-entete">'
+        f'<div class="dlc-panel-icone">{icone}</div>'
+        f'<div class="dlc-panel-titre">{html_lib.escape(str(titre))}</div>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
 
 
 def afficher_hero(logo_url, titre, sous_titre=""):
@@ -1711,105 +1832,113 @@ if not mode_admin:
                         st.info("Ce numéro ne fait pas encore partie du Club VIP. Il vous suffit d'un premier achat pour y accéder !")
 
     with st.sidebar:
-        st.subheader("🛒 Panier")
-        if not st.session_state.cart:
-            st.caption("Panier vide")
-        else:
-            total_panier = 0
-            for i, item in enumerate(st.session_state.cart):
-                sous_total = item["prix"] * item["quantite"]
-                total_panier += sous_total
-                variante = " / ".join(v for v in [item.get("taille"), item.get("couleur")] if v)
-                label = f"{item['nom']} ({variante})" if variante else item["nom"]
-                st.write(f"{label} × {item['quantite']} = {int(sous_total)} FCFA")
-                if st.button("🗑️", key=f"suppr_{i}"):
-                    st.session_state.cart.pop(i)
-                    synchroniser_panier_url()
-                    st.rerun()
+        st.markdown(
+            '<div class="dlc-sidebar-masthead">'
+            '<span class="dlc-dot"></span>'
+            '<span class="dlc-masthead-texte">Espace client</span>'
+            '</div>',
+            unsafe_allow_html=True
+        )
 
-            st.markdown(f"### Total : {int(total_panier)} FCFA")
+        with st.container(border=True):
+            entete_panneau_sidebar("🛒", "Panier", "Commande en cours")
+            if not st.session_state.cart:
+                st.caption("Panier vide")
+            else:
+                total_panier = 0
+                for i, item in enumerate(st.session_state.cart):
+                    sous_total = item["prix"] * item["quantite"]
+                    total_panier += sous_total
+                    variante = " / ".join(v for v in [item.get("taille"), item.get("couleur")] if v)
+                    label = f"{item['nom']} ({variante})" if variante else item["nom"]
+                    st.write(f"{label} × {item['quantite']} = {int(sous_total)} FCFA")
+                    if st.button("🗑️", key=f"suppr_{i}"):
+                        st.session_state.cart.pop(i)
+                        synchroniser_panier_url()
+                        st.rerun()
 
-            # Champs HORS formulaire (contrairement à avant) pour permettre la
-            # sauvegarde automatique du panier abandonné pendant la saisie,
-            # avant même que le client ait cliqué sur "Confirmer".
-            client_nom = st.text_input("Votre nom", key="checkout_nom")
-            client_tel = st.text_input("Votre téléphone", key="checkout_tel")
+                st.markdown(f"### Total : {int(total_panier)} FCFA")
 
-            if client_tel.strip():
-                sauvegarder_panier_abandonne(client_tel, client_nom, st.session_state.cart)
+                # Champs HORS formulaire (contrairement à avant) pour permettre la
+                # sauvegarde automatique du panier abandonné pendant la saisie,
+                # avant même que le client ait cliqué sur "Confirmer".
+                client_nom = st.text_input("Votre nom", key="checkout_nom")
+                client_tel = st.text_input("Votre téléphone", key="checkout_tel")
 
-            if st.button("✅ Confirmer la commande"):
-                if not client_nom.strip() or not client_tel.strip():
-                    st.warning("Merci de renseigner votre nom et votre téléphone.")
-                else:
-                    articles_payload = [
-                        {"produit_id": a["produit_id"], "nom": a["nom"], "quantite": a["quantite"]}
-                        for a in st.session_state.cart
-                    ]
-                    resultat = sb.rpc("passer_commande", {
-                        "p_client_nom": client_nom.strip(),
-                        "p_tel": client_tel.strip(),
-                        "p_articles": articles_payload,
-                        "p_marchand_id": MARCHAND_ID
-                    }).execute()
-                    donnee = resultat.data or {}
-                    envoyer_notification_commande(
-                        donnee.get("id_commande"), client_nom.strip(), client_tel.strip(),
-                        donnee.get("articles", []), donnee.get("total", 0), donnee.get("introuvables", [])
-                    )
-                    marquer_panier_converti(client_tel.strip())
+                if client_tel.strip():
+                    sauvegarder_panier_abandonne(client_tel, client_nom, st.session_state.cart)
 
-                    # 🆕 Bouton WhatsApp -- absent depuis la migration. Le
-                    # client peut prévenir directement la boutique sur
-                    # WhatsApp en plus de la commande déjà enregistrée en
-                    # base, avec le récapitulatif pré-rempli.
-                    if WHATSAPP:
-                        recap = "\n".join(
-                            f"- {a['nom']} x{a['quantite']}" for a in donnee.get("articles", [])
+                if st.button("✅ Confirmer la commande"):
+                    if not client_nom.strip() or not client_tel.strip():
+                        st.warning("Merci de renseigner votre nom et votre téléphone.")
+                    else:
+                        articles_payload = [
+                            {"produit_id": a["produit_id"], "nom": a["nom"], "quantite": a["quantite"]}
+                            for a in st.session_state.cart
+                        ]
+                        resultat = sb.rpc("passer_commande", {
+                            "p_client_nom": client_nom.strip(),
+                            "p_tel": client_tel.strip(),
+                            "p_articles": articles_payload,
+                            "p_marchand_id": MARCHAND_ID
+                        }).execute()
+                        donnee = resultat.data or {}
+                        envoyer_notification_commande(
+                            donnee.get("id_commande"), client_nom.strip(), client_tel.strip(),
+                            donnee.get("articles", []), donnee.get("total", 0), donnee.get("introuvables", [])
                         )
-                        message_whatsapp = (
-                            f"Bonjour, je m'appelle {client_nom.strip()} et je viens de passer "
-                            f"la commande {donnee.get('id_commande')} :\n"
-                            f"{recap}\nTotal : {int(donnee.get('total', 0))} FCFA\n"
-                            f"Mon téléphone : {client_tel.strip()}"
-                        )
-                        lien_whatsapp = f"https://wa.me/{WHATSAPP}?text={requests.utils.quote(message_whatsapp)}"
-                        st.link_button("💬 Confirmer aussi sur WhatsApp", lien_whatsapp)
+                        marquer_panier_converti(client_tel.strip())
 
-                    st.session_state.cart = []
-                    st.session_state.dernier_panier_signature = None
-                    synchroniser_panier_url()
-                    forcer_rafraichissement()
-                    st.success(f"Commande {donnee.get('id_commande')} enregistrée ! Total : {int(donnee.get('total', 0))} FCFA")
-                    if donnee.get("ruptures"):
-                        st.warning(f"Stock épuisé pour : {', '.join(donnee['ruptures'])}")
+                        # 🆕 Bouton WhatsApp -- absent depuis la migration. Le
+                        # client peut prévenir directement la boutique sur
+                        # WhatsApp en plus de la commande déjà enregistrée en
+                        # base, avec le récapitulatif pré-rempli.
+                        if WHATSAPP:
+                            recap = "\n".join(
+                                f"- {a['nom']} x{a['quantite']}" for a in donnee.get("articles", [])
+                            )
+                            message_whatsapp = (
+                                f"Bonjour, je m'appelle {client_nom.strip()} et je viens de passer "
+                                f"la commande {donnee.get('id_commande')} :\n"
+                                f"{recap}\nTotal : {int(donnee.get('total', 0))} FCFA\n"
+                                f"Mon téléphone : {client_tel.strip()}"
+                            )
+                            lien_whatsapp = f"https://wa.me/{WHATSAPP}?text={requests.utils.quote(message_whatsapp)}"
+                            st.link_button("💬 Confirmer aussi sur WhatsApp", lien_whatsapp)
+
+                        st.session_state.cart = []
+                        st.session_state.dernier_panier_signature = None
+                        synchroniser_panier_url()
+                        forcer_rafraichissement()
+                        st.success(f"Commande {donnee.get('id_commande')} enregistrée ! Total : {int(donnee.get('total', 0))} FCFA")
+                        if donnee.get("ruptures"):
+                            st.warning(f"Stock épuisé pour : {', '.join(donnee['ruptures'])}")
 
         # ❤️ Mes favoris -- toujours visible dans la sidebar, pour que le
         # client retrouve en un coup d'œil les articles qu'il a marqués,
         # sans avoir à refaire défiler tout le catalogue.
-        st.divider()
-        st.subheader("❤️ Mes favoris")
-        if not st.session_state.favoris:
-            st.caption("Aucun favori pour le moment.")
-        else:
-            articles_favoris = df_catalogue[
-                df_catalogue.apply(
-                    lambda r: normaliser(r.get("id") or r.get("nom")) in st.session_state.favoris,
-                    axis=1
-                )
-            ]
-            for _, art_favori in articles_favoris.iterrows():
-                id_favori = normaliser(art_favori.get("id") or art_favori.get("nom"))
-                col_nom_favori, col_suppr_favori = st.columns([3, 1])
-                col_nom_favori.write(f"❤️ {art_favori['nom']} — {int(art_favori.get('prix') or 0)} FCFA")
-                if col_suppr_favori.button("🗑️", key=f"suppr_favori_{id_favori}"):
-                    st.session_state.favoris.remove(id_favori)
-                    synchroniser_favoris_url()
-                    st.rerun()
+        with st.container(border=True):
+            entete_panneau_sidebar("❤️", "Mes favoris", "Sélection")
+            if not st.session_state.favoris:
+                st.caption("Aucun favori pour le moment.")
+            else:
+                articles_favoris = df_catalogue[
+                    df_catalogue.apply(
+                        lambda r: normaliser(r.get("id") or r.get("nom")) in st.session_state.favoris,
+                        axis=1
+                    )
+                ]
+                for _, art_favori in articles_favoris.iterrows():
+                    id_favori = normaliser(art_favori.get("id") or art_favori.get("nom"))
+                    col_nom_favori, col_suppr_favori = st.columns([3, 1])
+                    col_nom_favori.write(f"❤️ {art_favori['nom']} — {int(art_favori.get('prix') or 0)} FCFA")
+                    if col_suppr_favori.button("🗑️", key=f"suppr_favori_{id_favori}"):
+                        st.session_state.favoris.remove(id_favori)
+                        synchroniser_favoris_url()
+                        st.rerun()
 
         # 🆕 Suivi de commande -- un client peut retrouver le statut de sa
         # commande avec son numéro de téléphone, sans avoir besoin de compte.
-        st.divider()
         # 🔒 FIX SÉCURITÉ : avant, n'importe quel visiteur pouvait consulter
         # les commandes (nom, montant, articles) de n'importe quel numéro de
         # téléphone deviné ou récupéré ailleurs, sans preuve qu'il lui
@@ -1866,9 +1995,10 @@ if not mode_admin:
                                 )
 
         if WHATSAPP:
-            st.divider()
-            lien_contact = f"https://wa.me/{WHATSAPP}"
-            st.link_button("💬 Nous contacter sur WhatsApp", lien_contact)
+            with st.container(border=True):
+                entete_panneau_sidebar("💬", "Contact", "Assistance directe")
+                lien_contact = f"https://wa.me/{WHATSAPP}"
+                st.link_button("Nous contacter sur WhatsApp", lien_contact, use_container_width=True)
 
 
 # ====================== 8. ADMIN ======================
