@@ -863,6 +863,104 @@ def afficher_hero(logo_url, titre, sous_titre=""):
         )
 
 
+# ====================== 3bis. ASSISTANT IA -- descriptions & posts (module premium) ======================
+# 🤖 Génère du texte marketing (descriptions produits, posts réseaux
+# sociaux) via une rotation de 3 API : si la clé/quota d'une API pose
+# problème, la suivante prend le relais automatiquement -- le marchand
+# n'a jamais à s'en soucier.
+#   1. Groq (rapide, modèles Llama) -- primaire
+#   2. Gemini 1.5 Flash (Google) -- secours
+#   3. DeepSeek -- dernier recours
+# Nécessite GROQ_API_KEY / GEMINI_API_KEY / DEEPSEEK_API_KEY dans les
+# secrets Streamlit. Une clé manquante ne bloque rien : ce fournisseur est
+# simplement sauté dans la rotation.
+def _cle_secrete(nom):
+    try:
+        return st.secrets.get(nom)
+    except Exception:
+        return None
+
+
+def _generer_via_groq(prompt, max_tokens):
+    cle = _cle_secrete("GROQ_API_KEY")
+    if not cle:
+        return None
+    reponse = requests.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        headers={"Authorization": f"Bearer {cle}", "Content-Type": "application/json"},
+        json={
+            "model": "llama-3.3-70b-versatile",
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": 0.85,
+        },
+        timeout=30,
+    )
+    reponse.raise_for_status()
+    return reponse.json()["choices"][0]["message"]["content"].strip()
+
+
+def _generer_via_gemini(prompt, max_tokens):
+    cle = _cle_secrete("GEMINI_API_KEY")
+    if not cle:
+        return None
+    reponse = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={cle}",
+        json={
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.85},
+        },
+        timeout=30,
+    )
+    reponse.raise_for_status()
+    return reponse.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+
+def _generer_via_deepseek(prompt, max_tokens):
+    cle = _cle_secrete("DEEPSEEK_API_KEY")
+    if not cle:
+        return None
+    reponse = requests.post(
+        "https://api.deepseek.com/chat/completions",
+        headers={"Authorization": f"Bearer {cle}", "Content-Type": "application/json"},
+        json={
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": 0.85,
+        },
+        timeout=30,
+    )
+    reponse.raise_for_status()
+    return reponse.json()["choices"][0]["message"]["content"].strip()
+
+
+def generer_texte_ia(prompt, max_tokens=400):
+    """Essaie Groq, puis Gemini, puis DeepSeek dans cet ordre. Retourne
+    (texte, erreur) -- texte vaut None si les 3 fournisseurs ont échoué ou
+    n'ont pas de clé configurée."""
+    fournisseurs = [
+        ("Groq", _generer_via_groq),
+        ("Gemini", _generer_via_gemini),
+        ("DeepSeek", _generer_via_deepseek),
+    ]
+    aucune_cle = True
+    for nom_fournisseur, fonction in fournisseurs:
+        if not _cle_secrete({"Groq": "GROQ_API_KEY", "Gemini": "GEMINI_API_KEY", "DeepSeek": "DEEPSEEK_API_KEY"}[nom_fournisseur]):
+            continue
+        aucune_cle = False
+        try:
+            texte = fonction(prompt, max_tokens)
+            if texte:
+                return texte, None
+        except Exception:
+            logger.exception(f"Échec génération IA via {nom_fournisseur}, tentative du fournisseur suivant")
+            continue
+    if aucune_cle:
+        return None, "Aucune clé API IA n'est configurée (GROQ_API_KEY / GEMINI_API_KEY / DEEPSEEK_API_KEY)."
+    return None, "Les 3 fournisseurs IA ont échoué (quota, réseau...). Réessaie dans un instant."
+
+
 # ====================== 3ter. GÉNÉRATEUR DE VISUEL RÉSEAUX SOCIAUX (module premium) ======================
 # 🖼️ Compose une image carrée (format Instagram/Facebook) à partir de la
 # photo d'un article + son nom + son prix + le nom de la boutique, que le
@@ -1661,6 +1759,9 @@ if not mode_admin:
                             afficher_compte_a_rebours(str(row["promo_expire_le"]), cle=f"flash_{idx}")
                     else:
                         st.markdown(f'<span class="destiny-prix-normal">{int(prix)} FCFA</span>', unsafe_allow_html=True)
+
+                    if row.get("description"):
+                        st.caption(str(row["description"]))
 
                     # ❤️ Favoris -- disponible même en rupture de stock, pour
                     # que le client puisse quand même sauvegarder l'article et
@@ -2676,10 +2777,10 @@ else:
             else:
                 st.success("✨ Module Aura Luxe actif sur ta boutique.")
 
-                (sous_tab_theme, sous_tab_banniere, sous_tab_visuel, sous_tab_flash,
+                (sous_tab_theme, sous_tab_banniere, sous_tab_visuel, sous_tab_ia, sous_tab_flash,
                  sous_tab_vip, sous_tab_vedette, sous_tab_diffusion) = st.tabs(
                     ["🎨 Thème & badge", "🏷️ Bannière promo", "🖼️ Visuel réseaux sociaux",
-                     "⚡ Flash Sales & Collections", "👑 Club VIP",
+                     "🤖 Assistant IA", "⚡ Flash Sales & Collections", "👑 Club VIP",
                      "⭐ Mise en vedette", "💬 Diffusion WhatsApp"]
                 )
 
@@ -2787,6 +2888,109 @@ else:
                                     file_name=f"pub_{normaliser(produit_choisi)}.png",
                                     mime="image/png",
                                 )
+
+                # ---- Assistant IA : descriptions produits + posts réseaux sociaux ----
+                with sous_tab_ia:
+                    st.caption(
+                        "Génère du texte marketing via IA (rotation Groq → Gemini → DeepSeek : "
+                        "si l'un est indisponible, le suivant prend le relais automatiquement)."
+                    )
+                    if df_catalogue.empty:
+                        st.caption("Ajoute d'abord des articles dans l'onglet Catalogue.")
+                    else:
+                        st.markdown("#### ✍️ Description produit")
+                        produit_ia_desc = st.selectbox(
+                            "Article", df_catalogue["nom"].dropna().tolist(), key="ia_produit_description"
+                        )
+                        ligne_ia_desc = df_catalogue[df_catalogue["nom"] == produit_ia_desc].iloc[0]
+                        ton_description = st.select_slider(
+                            "Ton", ["Sobre & élégant", "Chaleureux", "Ultra-luxe & aspirationnel"],
+                            value="Ultra-luxe & aspirationnel", key="ia_ton_description"
+                        )
+                        if st.button("🤖 Générer une description", key="ia_generer_description"):
+                            prompt_description = (
+                                f"Tu es rédacteur pour une boutique de luxe en ligne nommée "
+                                f"« {config.get('nom_boutique', 'la boutique')} ». Rédige en français une "
+                                f"description produit courte (3 à 4 phrases, pas de titre, pas de guillemets) "
+                                f"pour l'article suivant : nom = « {ligne_ia_desc.get('nom')} », "
+                                f"catégorie = « {ligne_ia_desc.get('categorie') or 'non précisée'} », "
+                                f"prix = {int(ligne_ia_desc.get('prix') or 0)} FCFA. "
+                                f"Ton souhaité : {ton_description}. N'invente aucune caractéristique technique "
+                                f"précise (matière, dimensions...) que tu ne connais pas -- reste évocateur sur "
+                                f"l'usage et le ressenti plutôt que sur des détails factuels non fournis."
+                            )
+                            with st.spinner("Génération en cours..."):
+                                texte_genere, erreur_ia = generer_texte_ia(prompt_description, max_tokens=220)
+                            if erreur_ia:
+                                st.error(f"❌ {erreur_ia}")
+                            else:
+                                st.session_state["ia_description_generee"] = texte_genere
+
+                        if st.session_state.get("ia_description_generee"):
+                            description_finale = st.text_area(
+                                "Description générée (modifiable avant enregistrement)",
+                                value=st.session_state["ia_description_generee"],
+                                key="ia_description_editable",
+                                height=120,
+                            )
+                            if st.button("💾 Enregistrer sur la fiche produit", key="ia_enregistrer_description"):
+                                try:
+                                    sb_admin.table("catalogue").update(
+                                        {"description": description_finale.strip()}
+                                    ).eq("id", ligne_ia_desc["id"]).eq("marchand_id", MARCHAND_ID).execute()
+                                except Exception:
+                                    logger.exception("Échec enregistrement description IA")
+                                    st.error(
+                                        "❌ L'enregistrement a échoué -- vérifie que la colonne "
+                                        "\"description\" existe bien dans la table catalogue (voir migration SQL)."
+                                    )
+                                else:
+                                    forcer_rafraichissement()
+                                    st.success("Description enregistrée sur la fiche produit.")
+                                    del st.session_state["ia_description_generee"]
+                                    st.rerun()
+
+                        st.divider()
+                        st.markdown("#### 📱 Post réseaux sociaux")
+                        produit_ia_post = st.selectbox(
+                            "Article", df_catalogue["nom"].dropna().tolist(), key="ia_produit_post"
+                        )
+                        ligne_ia_post = df_catalogue[df_catalogue["nom"] == produit_ia_post].iloc[0]
+                        plateforme_post = st.radio(
+                            "Plateforme", ["Instagram / Facebook", "WhatsApp"],
+                            horizontal=True, key="ia_plateforme_post"
+                        )
+                        if st.button("🤖 Générer le post", key="ia_generer_post"):
+                            if plateforme_post == "Instagram / Facebook":
+                                consigne_post = (
+                                    "Rédige une légende Instagram/Facebook accrocheuse (4 à 6 lignes), avec "
+                                    "quelques emojis pertinents et 5 à 8 hashtags pertinents à la fin."
+                                )
+                            else:
+                                consigne_post = (
+                                    "Rédige un court message WhatsApp (2 à 3 phrases, ton chaleureux et direct, "
+                                    "quelques emojis), sans hashtags, comme si la boutique écrivait à ses clients."
+                                )
+                            prompt_post = (
+                                f"Tu gères les réseaux sociaux de la boutique de luxe « {config.get('nom_boutique', 'la boutique')} ». "
+                                f"{consigne_post} Sujet : l'article « {ligne_ia_post.get('nom')} » à "
+                                f"{int(ligne_ia_post.get('prix') or 0)} FCFA. Réponds uniquement avec le texte du post, "
+                                f"en français, sans introduction ni explication."
+                            )
+                            with st.spinner("Génération en cours..."):
+                                texte_post, erreur_post = generer_texte_ia(prompt_post, max_tokens=280)
+                            if erreur_post:
+                                st.error(f"❌ {erreur_post}")
+                            else:
+                                st.session_state["ia_post_genere"] = texte_post
+
+                        if st.session_state.get("ia_post_genere"):
+                            st.text_area(
+                                "Post généré (copie-colle sur tes réseaux)",
+                                value=st.session_state["ia_post_genere"],
+                                key="ia_post_editable",
+                                height=160,
+                            )
 
                 # ---- Flash Sales (compte à rebours) + Collections temporaires ----
                 with sous_tab_flash:
