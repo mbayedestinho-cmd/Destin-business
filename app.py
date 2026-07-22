@@ -47,6 +47,10 @@ st.markdown("""
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     h1, h2, h3 { font-family: 'Playfair Display', serif !important; letter-spacing: 0.3px; }
 
+    /* 🎨 Variable de thème -- surchargée par boutique premium via
+       injecter_theme_premium(). Par défaut : doré classique Destiny. */
+    :root { --aura-accent: #c9a35c; --aura-accent-clair: #dab873; }
+
     .stApp { background: linear-gradient(180deg, #0d0d0f 0%, #16151a 100%); }
 
     /* Cartes produit */
@@ -61,26 +65,26 @@ st.markdown("""
     /* Boutons */
     .stButton > button {
         border-radius: 8px;
-        border: 1px solid #c9a35c;
-        color: #c9a35c;
+        border: 1px solid var(--aura-accent);
+        color: var(--aura-accent);
         background: transparent;
         font-weight: 500;
         transition: all 0.2s ease;
     }
     .stButton > button:hover {
-        background: #c9a35c;
+        background: var(--aura-accent);
         color: #16151a;
-        border-color: #c9a35c;
+        border-color: var(--aura-accent);
     }
     .stFormSubmitButton > button {
         border-radius: 8px;
-        background: #c9a35c;
+        background: var(--aura-accent);
         color: #16151a;
         font-weight: 600;
         border: none;
     }
     .stFormSubmitButton > button:hover {
-        background: #dab873;
+        background: var(--aura-accent-clair);
     }
 
     /* Prix et titres produits */
@@ -108,6 +112,40 @@ st.markdown("""
         letter-spacing: 0.2px;
     }
     .destiny-prix-normal { color: #eae4d8; font-weight: 600; font-size: 1.05rem; }
+
+    /* ✨ Badge Aura Luxe -- doré, animé, réservé aux boutiques premium */
+    .aura-badge {
+        display: inline-flex; align-items: center; gap: 6px;
+        background: linear-gradient(120deg, #f0d9a6, #c9a35c, #f0d9a6, #c9a35c);
+        background-size: 300% 100%;
+        animation: aura-shimmer 3.5s linear infinite;
+        color: #16151a; font-weight: 700; font-size: 0.82rem;
+        padding: 4px 12px; border-radius: 20px; letter-spacing: 0.3px;
+        box-shadow: 0 2px 14px rgba(201,163,92,0.5);
+    }
+    @keyframes aura-shimmer {
+        0% { background-position: 0% 50%; }
+        100% { background-position: 300% 50%; }
+    }
+
+    /* 🔮 Bannière promo -- variante néon (module Aura Luxe) */
+    .aura-banniere-neon {
+        border: 1px solid var(--aura-accent) !important;
+        box-shadow: 0 0 10px var(--aura-accent), 0 0 24px rgba(201,163,92,0.35), inset 0 0 12px rgba(201,163,92,0.12) !important;
+        animation: aura-neon-pulse 2.4s ease-in-out infinite;
+    }
+    @keyframes aura-neon-pulse {
+        0%, 100% { box-shadow: 0 0 8px var(--aura-accent), 0 0 18px rgba(201,163,92,0.3), inset 0 0 10px rgba(201,163,92,0.1); }
+        50% { box-shadow: 0 0 16px var(--aura-accent), 0 0 34px rgba(201,163,92,0.55), inset 0 0 16px rgba(201,163,92,0.2); }
+    }
+
+    /* ⚡ Compte à rebours Flash Sale */
+    .aura-flash-badge {
+        display: inline-flex; align-items: center; gap: 5px;
+        background: #2a1810; border: 1px solid #e0703f; color: #ffb27a;
+        font-weight: 700; font-size: 0.8rem; padding: 3px 10px; border-radius: 14px;
+        margin: 3px 0;
+    }
 
     /* Bandeau logo -- effet "bling" premium plein écran */
     .destiny-hero {
@@ -556,6 +594,78 @@ def afficher_hero(logo_url, titre, sous_titre=""):
         )
 
 
+# ====================== 3ter. GÉNÉRATEUR DE VISUEL RÉSEAUX SOCIAUX (module premium) ======================
+# 🖼️ Compose une image carrée (format Instagram/Facebook) à partir de la
+# photo d'un article + son nom + son prix + le nom de la boutique, que le
+# marchand peut ensuite télécharger et publier lui-même sur ses réseaux.
+# Nécessite Pillow (paquet "Pillow" dans requirements.txt).
+def generer_visuel_produit(url_image_produit, nom_produit, prix, nom_boutique, prix_promo=None):
+    """Retourne les octets PNG du visuel généré, ou (None, message_erreur)."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        from io import BytesIO
+    except ImportError:
+        return None, "Le paquet Pillow n'est pas installé (ajoute \"Pillow\" à requirements.txt)."
+
+    TAILLE = 1080
+    toile = Image.new("RGB", (TAILLE, TAILLE), color=(13, 13, 15))
+
+    # Photo produit (si disponible) redimensionnée en couvrant la moitié
+    # supérieure de la toile, recadrée au centre.
+    zone_photo_h = int(TAILLE * 0.68)
+    if url_image_produit:
+        try:
+            reponse = requests.get(url_image_produit, timeout=15)
+            photo = Image.open(BytesIO(reponse.content)).convert("RGB")
+            ratio = max(TAILLE / photo.width, zone_photo_h / photo.height)
+            nouvelle_taille = (int(photo.width * ratio), int(photo.height * ratio))
+            photo = photo.resize(nouvelle_taille)
+            gauche = (photo.width - TAILLE) // 2
+            haut = (photo.height - zone_photo_h) // 2
+            photo = photo.crop((gauche, haut, gauche + TAILLE, haut + zone_photo_h))
+            toile.paste(photo, (0, 0))
+        except Exception:
+            pass  # pas de photo -> on garde juste le fond sombre, pas bloquant
+
+    dessin = ImageDraw.Draw(toile)
+
+    def police(taille, gras=False):
+        chemins = (
+            ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"] if gras else
+            ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
+        )
+        for chemin in chemins:
+            try:
+                return ImageFont.truetype(chemin, taille)
+            except Exception:
+                continue
+        return ImageFont.load_default()
+
+    # Bandeau doré en bas avec nom boutique, nom produit et prix.
+    dessin.rectangle([0, zone_photo_h, TAILLE, TAILLE], fill=(22, 21, 26))
+    dessin.rectangle([0, zone_photo_h, TAILLE, zone_photo_h + 6], fill=(201, 163, 92))
+
+    marge = 50
+    y = zone_photo_h + 34
+    dessin.text((marge, y), (nom_boutique or "").upper()[:40], font=police(30, gras=True), fill=(201, 163, 92))
+    y += 48
+    dessin.text((marge, y), (nom_produit or "")[:60], font=police(46, gras=True), fill=(234, 228, 216))
+    y += 74
+
+    if prix_promo and float(prix_promo) > 0 and float(prix_promo) < float(prix or 0):
+        texte_prix = f"{int(prix_promo)} FCFA"
+        texte_ancien = f"{int(prix)} FCFA"
+        dessin.text((marge, y), texte_prix, font=police(52, gras=True), fill=(240, 217, 166))
+        largeur_prix = dessin.textlength(texte_prix, font=police(52, gras=True))
+        dessin.text((marge + largeur_prix + 24, y + 10), texte_ancien, font=police(32), fill=(133, 127, 115))
+    else:
+        dessin.text((marge, y), f"{int(prix or 0)} FCFA", font=police(52, gras=True), fill=(234, 228, 216))
+
+    tampon = BytesIO()
+    toile.save(tampon, format="PNG")
+    return tampon.getvalue(), None
+
+
 # ====================== 4bis. PANIER PERSISTANT (survit à un redéploiement) ======================
 # 🔒 FIX : le panier vit normalement dans st.session_state, qui est stocké en
 # mémoire côté serveur. Or un redéploiement de l'app (ex: ajout d'un paquet
@@ -621,6 +731,78 @@ def charger_catalogue(marchand_id, _refresh=0):
 
 
 @st.cache_data(ttl=20)
+def charger_collections(marchand_id, _refresh=0):
+    """Toutes les collections du marchand (actives ou non), pour l'admin."""
+    reponse = (
+        sb.table("collections")
+        .select("*")
+        .eq("marchand_id", marchand_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return reponse.data or []
+
+
+def collections_actives_non_expirees(collections: list) -> list:
+    """Filtre une liste de collections pour ne garder que celles actives et
+    pas encore expirées -- effet 'exclusivité' d'Aura Luxe : passé la date,
+    la collection disparaît d'elle-même du site, sans action du marchand."""
+    maintenant = datetime.now(timezone.utc)
+    resultat = []
+    for c in collections:
+        if not c.get("actif"):
+            continue
+        expire_le = c.get("expire_le")
+        if expire_le:
+            try:
+                date_expire = datetime.fromisoformat(str(expire_le).replace("Z", "+00:00"))
+                if date_expire <= maintenant:
+                    continue
+            except ValueError:
+                pass
+        resultat.append(c)
+    return resultat
+
+
+def afficher_compte_a_rebours(date_fin_iso: str, cle: str):
+    """Petit compte à rebours JS live (⏳ Termine dans HH:MM:SS) pour une
+    Flash Sale -- module Aura Luxe. Ne bloque jamais l'affichage produit si
+    la date est invalide : on n'affiche simplement rien."""
+    try:
+        # validation basique -- si ça plante ici, on ne montre rien plutôt
+        # que de casser la carte produit.
+        datetime.fromisoformat(str(date_fin_iso).replace("Z", "+00:00"))
+    except Exception:
+        return
+    components.html(
+        f"""
+        <div id="cptdown_{cle}" class="aura-flash-badge">⚡ ...</div>
+        <script>
+        (function() {{
+            const fin = new Date("{date_fin_iso}").getTime();
+            const el = document.getElementById("cptdown_{cle}");
+            function tick() {{
+                const reste = fin - new Date().getTime();
+                if (!el) return;
+                if (reste <= 0) {{
+                    el.innerHTML = "⚡ Offre terminée";
+                    return;
+                }}
+                const h = Math.floor(reste / 3600000);
+                const m = Math.floor((reste % 3600000) / 60000);
+                const s = Math.floor((reste % 60000) / 1000);
+                el.innerHTML = "⏳ Termine dans " + h + "h " + String(m).padStart(2,'0') + "m " + String(s).padStart(2,'0') + "s";
+                setTimeout(tick, 1000);
+            }}
+            tick();
+        }})();
+        </script>
+        """,
+        height=34,
+    )
+
+
+@st.cache_data(ttl=20)
 def charger_config(marchand_id, _refresh=0):
     # Les réglages spécifiques à CETTE boutique vivent maintenant dans
     # `marchands` (une ligne par marchand) et non plus dans `config`
@@ -632,7 +814,10 @@ def charger_config(marchand_id, _refresh=0):
         .select(
             "nom_boutique, slogan, logo, whatsapp, email_contact, "
             "seuil_stock_bas, heure_bilan, derniere_alerte_stock_date, "
-            "dernier_bilan_date, mot_de_passe_hash"
+            "dernier_bilan_date, mot_de_passe_hash, "
+            "palier_abonnement, en_vedette, banniere_actif, banniere_titre, "
+            "banniere_texte, banniere_code_promo, theme_couleur, banniere_style, "
+            "vip_offre_actif, vip_offre_titre, vip_offre_texte, vip_offre_code"
         )
         .eq("id", marchand_id)
         .execute()
@@ -655,7 +840,59 @@ def charger_config(marchand_id, _refresh=0):
             str(ligne["dernier_bilan_date"]) if ligne.get("dernier_bilan_date") else None
         ),
         "mot_de_passe": ligne.get("mot_de_passe_hash"),
+        # 📣 Module Marketing & Pub -- voir section 4bis-marketing plus bas.
+        # "palier_abonnement" vaut "standard" ou "premium" et n'est modifiable
+        # QUE depuis le Super Admin (1_Super_Admin.py), jamais par le marchand
+        # lui-même : c'est ce qui garantit que le module reste payant.
+        "palier_abonnement": ligne.get("palier_abonnement") or "standard",
+        "en_vedette": bool(ligne.get("en_vedette")),
+        "banniere_actif": bool(ligne.get("banniere_actif")),
+        "banniere_titre": ligne.get("banniere_titre"),
+        "banniere_texte": ligne.get("banniere_texte"),
+        "banniere_code_promo": ligne.get("banniere_code_promo"),
+        # 🎨 Identité premium (badge doré + thème couleur + style bannière)
+        "theme_couleur": ligne.get("theme_couleur") or "#c9a35c",
+        "banniere_style": ligne.get("banniere_style") or "classique",
+        # 👑 Club VIP
+        "vip_offre_actif": bool(ligne.get("vip_offre_actif")),
+        "vip_offre_titre": ligne.get("vip_offre_titre"),
+        "vip_offre_texte": ligne.get("vip_offre_texte"),
+        "vip_offre_code": ligne.get("vip_offre_code"),
     }
+
+
+def injecter_theme_premium(config: dict):
+    """Surcharge la variable CSS --aura-accent avec la couleur choisie par
+    le marchand premium (boutons, badges, halo héro...). Ne fait rien pour
+    une boutique standard -- elle garde le doré par défaut."""
+    if not boutique_premium(config):
+        return
+    couleur = config.get("theme_couleur") or "#c9a35c"
+    if not re.match(r"^#[0-9a-fA-F]{6}$", couleur):
+        return
+    # Version plus claire de la couleur pour le hover, en éclaircissant
+    # chaque canal RVB de 20% vers le blanc.
+    r, g, b = (int(couleur[i:i + 2], 16) for i in (1, 3, 5))
+    r, g, b = (min(255, int(c + (255 - c) * 0.25)) for c in (r, g, b))
+    couleur_claire = f"#{r:02x}{g:02x}{b:02x}"
+    st.markdown(
+        f"<style>:root {{ --aura-accent: {couleur}; --aura-accent-clair: {couleur_claire}; }}</style>",
+        unsafe_allow_html=True
+    )
+
+
+def afficher_badge_aura():
+    """Petit badge doré animé 'Aura Luxe' -- affiché à côté du nom de la
+    boutique pour les visiteurs, uniquement si premium."""
+    st.markdown('<span class="aura-badge">✨ Aura Luxe</span>', unsafe_allow_html=True)
+
+
+
+    """La boutique a-t-elle le module Marketing & Pub débloqué ? Ce champ
+    n'est modifiable QUE depuis le Super Admin (côté marchand, aucun bouton
+    ne permet de le changer) -- c'est ce qui garantit que le module reste
+    payant et activé manuellement après paiement."""
+    return (config.get("palier_abonnement") or "standard") == "premium"
 
 
 @st.cache_data(ttl=30)
@@ -1012,7 +1249,33 @@ if not mode_admin:
     if AUTOREFRESH_DISPONIBLE:
         st_autorefresh(interval=20000, key="rafraichissement_boutique")
 
+    injecter_theme_premium(config)
     afficher_hero(LOGO_SUR, NOM_BOUTIQUE, SLOGAN_BOUTIQUE)
+
+    if boutique_premium(config):
+        st.markdown('<div style="text-align:center; margin-top:-12px; margin-bottom:14px;">', unsafe_allow_html=True)
+        afficher_badge_aura()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # 📣 Bannière promo (module Marketing & Pub, premium uniquement) --
+    # même si les champs restent en base pour une boutique repassée en
+    # standard, on ne l'affiche que si la boutique est ENCORE premium.
+    if boutique_premium(config) and config.get("banniere_actif") and config.get("banniere_titre"):
+        code_html = (
+            f'<span class="destiny-promo-badge">Code : {html_lib.escape(config.get("banniere_code_promo"))}</span>'
+            if config.get("banniere_code_promo") else ""
+        )
+        classe_neon = " aura-banniere-neon" if config.get("banniere_style") == "neon" else ""
+        st.markdown(
+            f'<div class="{classe_neon.strip()}" style="border:1px solid var(--aura-accent); border-radius:12px; padding:14px 18px; '
+            f'margin-bottom:18px; background:rgba(201,163,92,0.08); text-align:center;">'
+            f'<div style="color:#eae4d8; font-weight:700; font-size:1.1rem;">'
+            f'{html_lib.escape(config.get("banniere_titre") or "")}</div>'
+            f'<div style="color:#c9b98f; margin-top:4px;">{html_lib.escape(config.get("banniere_texte") or "")}</div>'
+            f'<div style="margin-top:8px;">{code_html}</div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
 
     with st.container():
         if df_catalogue.empty:
@@ -1027,6 +1290,21 @@ if not mode_admin:
                 df_affiche = df_affiche[df_affiche["nom"].str.contains(recherche, case=False, na=False)]
             if categorie_choisie != "Toutes":
                 df_affiche = df_affiche[df_affiche["categorie"] == categorie_choisie]
+
+            # ⭐ Collections temporaires (module Aura Luxe, premium uniquement)
+            # -- une collection expirée disparaît automatiquement du filtre,
+            # sans aucune action du marchand.
+            if boutique_premium(config):
+                collections_dispo = collections_actives_non_expirees(
+                    charger_collections(MARCHAND_ID, st.session_state.refresh_token)
+                )
+                if collections_dispo:
+                    noms_collections = {c["nom"]: c["id"] for c in collections_dispo}
+                    collection_choisie = st.selectbox(
+                        "⭐ Collection", ["Toutes"] + list(noms_collections.keys())
+                    )
+                    if collection_choisie != "Toutes":
+                        df_affiche = df_affiche[df_affiche["collection_id"] == noms_collections[collection_choisie]]
 
             colonnes_grille = st.columns(3)
             for idx, (_, row) in enumerate(df_affiche.iterrows()):
@@ -1072,6 +1350,10 @@ if not mode_admin:
                             f'</div>',
                             unsafe_allow_html=True
                         )
+                        # ⚡ Flash Sale (module Aura Luxe, premium uniquement) --
+                        # un compte à rebours live si une date de fin est définie.
+                        if boutique_premium(config) and row.get("promo_expire_le"):
+                            afficher_compte_a_rebours(str(row["promo_expire_le"]), cle=f"flash_{idx}")
                     else:
                         st.markdown(f'<span class="destiny-prix-normal">{int(prix)} FCFA</span>', unsafe_allow_html=True)
 
@@ -1162,6 +1444,38 @@ if not mode_admin:
                                         st.success(donnee.get("message"))
                                     else:
                                         st.error(donnee.get("message", "Erreur lors de l'envoi"))
+
+    # 👑 Club VIP (module Aura Luxe, premium uniquement) -- un visiteur peut
+    # vérifier lui-même s'il fait partie du club en tapant son numéro. Le
+    # contrôle passe par sb_admin (côté serveur uniquement, jamais exposé au
+    # navigateur) car la table clients_vip ne doit pas être lisible en public.
+    if boutique_premium(config) and config.get("vip_offre_actif") and config.get("vip_offre_titre"):
+        with st.expander("👑 Club VIP"):
+            st.caption("Déjà cliente ou client de la maison ? Vérifiez votre statut VIP.")
+            tel_verif = st.text_input("Votre numéro de téléphone", key="vip_tel_verif")
+            if st.button("Vérifier mon statut VIP", key="vip_verif_bouton"):
+                tel_normalise = re.sub(r"\D", "", tel_verif or "")
+                if not tel_normalise:
+                    st.warning("Merci de saisir un numéro de téléphone.")
+                else:
+                    try:
+                        resultat_vip = (
+                            get_admin_client().table("clients_vip")
+                            .select("id")
+                            .eq("marchand_id", MARCHAND_ID)
+                            .eq("telephone", tel_normalise)
+                            .execute()
+                        )
+                    except Exception:
+                        resultat_vip = None
+                    if resultat_vip and resultat_vip.data:
+                        st.success(f"✨ {config.get('vip_offre_titre')}")
+                        if config.get("vip_offre_texte"):
+                            st.write(config["vip_offre_texte"])
+                        if config.get("vip_offre_code"):
+                            st.code(config["vip_offre_code"])
+                    else:
+                        st.info("Ce numéro ne fait pas encore partie du Club VIP. Il vous suffit d'un premier achat pour y accéder !")
 
     with st.sidebar:
         st.subheader("🛒 Panier")
@@ -1350,9 +1664,9 @@ else:
             st.rerun()
 
         (tab_catalogue, tab_promos, tab_commandes, tab_avis, tab_stats,
-         tab_config, tab_alertes, tab_paniers) = st.tabs(
+         tab_config, tab_alertes, tab_paniers, tab_marketing) = st.tabs(
             ["📦 Catalogue", "🏷️ Promotions", "🧾 Commandes", "💬 Avis", "📊 Statistiques",
-             "⚙️ Config", "🔔 Alertes stock", "🛒 Paniers abandonnés"]
+             "⚙️ Config", "🔔 Alertes stock", "🛒 Paniers abandonnés", "✨ Aura Luxe"]
         )
 
         with tab_catalogue:
@@ -1923,3 +2237,387 @@ else:
                     if st.button("🗑️ Marquer comme traité", key=f"panier_traite_{cle_unique}"):
                         sb_admin.table("paniersabandonnés").update({"statut": "traite"}).eq("telephone", panier["telephone"]).eq("marchand_id", MARCHAND_ID).execute()
                         st.rerun()
+
+        with tab_marketing:
+            # 🔒 Module payant : ce n'est JAMAIS le marchand qui active son
+            # propre accès. "palier_abonnement" est modifiable uniquement
+            # depuis le Super Admin, après paiement. Ici on se contente de
+            # lire la valeur et de verrouiller l'onglet si elle n'est pas
+            # "premium" -- aucun bouton de déblocage n'existe côté marchand.
+            if not boutique_premium(config):
+                st.info(
+                    "✨ **Aura Luxe** est le module premium de la boutique (badge doré, "
+                    "thème personnalisé, bannières promo néon, flash sales, collections "
+                    "temporaires, club VIP, visuels réseaux sociaux, mise en vedette dans "
+                    "la vitrine commune, diffusion WhatsApp). Contacte-nous pour l'activer "
+                    "sur ta boutique."
+                )
+            else:
+                st.success("✨ Module Aura Luxe actif sur ta boutique.")
+
+                (sous_tab_theme, sous_tab_banniere, sous_tab_visuel, sous_tab_flash,
+                 sous_tab_vip, sous_tab_vedette, sous_tab_diffusion) = st.tabs(
+                    ["🎨 Thème & badge", "🏷️ Bannière promo", "🖼️ Visuel réseaux sociaux",
+                     "⚡ Flash Sales & Collections", "👑 Club VIP",
+                     "⭐ Mise en vedette", "💬 Diffusion WhatsApp"]
+                )
+
+                # ---- Thème couleur + badge Aura Luxe ----
+                with sous_tab_theme:
+                    st.caption(
+                        "Le badge ✨ Aura Luxe s'affiche automatiquement sur ta boutique. "
+                        "Choisis une couleur d'accent pour personnaliser boutons et bannières."
+                    )
+                    afficher_badge_aura()
+                    with st.form("form_theme_couleur"):
+                        couleur_choisie = st.color_picker(
+                            "Couleur d'accent de la boutique",
+                            value=config.get("theme_couleur") or "#c9a35c"
+                        )
+                        if st.form_submit_button("💾 Enregistrer le thème"):
+                            try:
+                                sb_admin.table("marchands").update({
+                                    "theme_couleur": couleur_choisie,
+                                }).eq("id", MARCHAND_ID).execute()
+                            except Exception:
+                                logger.exception("Échec enregistrement thème couleur")
+                                st.error("❌ L'enregistrement a échoué. Réessaie dans un instant.")
+                            else:
+                                forcer_rafraichissement()
+                                st.success("Thème mis à jour.")
+                                st.rerun()
+
+                # ---- Bannière promo interne à la boutique ----
+                with sous_tab_banniere:
+                    st.caption("Affichée en haut de ta boutique, juste sous le logo.")
+                    with st.form("form_banniere_promo"):
+                        banniere_actif_input = st.checkbox(
+                            "Afficher la bannière sur la boutique",
+                            value=bool(config.get("banniere_actif"))
+                        )
+                        banniere_titre_input = st.text_input(
+                            "Titre", value=config.get("banniere_titre") or "",
+                            placeholder="Ex : Soldes de fin d'année"
+                        )
+                        banniere_texte_input = st.text_area(
+                            "Texte", value=config.get("banniere_texte") or "",
+                            placeholder="Ex : -20% sur toute la collection jusqu'au 31 décembre"
+                        )
+                        banniere_code_input = st.text_input(
+                            "Code promo (facultatif)",
+                            value=config.get("banniere_code_promo") or "",
+                            placeholder="Ex : NOEL20"
+                        )
+                        banniere_style_input = st.radio(
+                            "Style",
+                            ["classique", "neon"],
+                            index=0 if config.get("banniere_style") != "neon" else 1,
+                            format_func=lambda s: "Classique" if s == "classique" else "🔮 Néon (halo animé)",
+                            horizontal=True,
+                        )
+                        if st.form_submit_button("💾 Enregistrer la bannière"):
+                            if banniere_actif_input and not banniere_titre_input.strip():
+                                st.warning("Ajoute au moins un titre avant d'activer la bannière.")
+                            else:
+                                try:
+                                    sb_admin.table("marchands").update({
+                                        "banniere_actif": banniere_actif_input,
+                                        "banniere_titre": banniere_titre_input.strip() or None,
+                                        "banniere_texte": banniere_texte_input.strip() or None,
+                                        "banniere_code_promo": banniere_code_input.strip() or None,
+                                        "banniere_style": banniere_style_input,
+                                    }).eq("id", MARCHAND_ID).execute()
+                                except Exception:
+                                    logger.exception("Échec enregistrement bannière promo")
+                                    st.error("❌ L'enregistrement a échoué. Réessaie dans un instant.")
+                                else:
+                                    forcer_rafraichissement()
+                                    st.success("Bannière mise à jour.")
+                                    st.rerun()
+
+                # ---- Générateur de visuel pour réseaux sociaux ----
+                with sous_tab_visuel:
+                    st.caption(
+                        "Génère une image prête à publier (format carré) pour un article "
+                        "de ton catalogue, avec ton nom de boutique, le nom de l'article et son prix."
+                    )
+                    if df_catalogue.empty:
+                        st.caption("Ajoute d'abord des articles dans l'onglet Catalogue.")
+                    else:
+                        options_produits = df_catalogue["nom"].dropna().tolist()
+                        produit_choisi = st.selectbox("Article", options_produits, key="visuel_produit_choisi")
+                        ligne_produit = df_catalogue[df_catalogue["nom"] == produit_choisi].iloc[0]
+                        if st.button("🖼️ Générer le visuel", key="generer_visuel_produit"):
+                            with st.spinner("Génération du visuel..."):
+                                octets_image, erreur_visuel = generer_visuel_produit(
+                                    url_image_produit=ligne_produit.get("image"),
+                                    nom_produit=ligne_produit.get("nom"),
+                                    prix=ligne_produit.get("prix"),
+                                    prix_promo=ligne_produit.get("prix_promo"),
+                                    nom_boutique=config.get("nom_boutique"),
+                                )
+                            if erreur_visuel:
+                                st.error(f"❌ {erreur_visuel}")
+                            else:
+                                st.image(octets_image, caption="Aperçu du visuel généré")
+                                st.download_button(
+                                    "⬇️ Télécharger le visuel",
+                                    data=octets_image,
+                                    file_name=f"pub_{normaliser(produit_choisi)}.png",
+                                    mime="image/png",
+                                )
+
+                # ---- Flash Sales (compte à rebours) + Collections temporaires ----
+                with sous_tab_flash:
+                    st.markdown("#### ⚡ Flash Sale sur un article")
+                    st.caption(
+                        "Applique un prix promo avec une date de fin précise : un compte "
+                        "à rebours s'affiche automatiquement sur la boutique."
+                    )
+                    if df_catalogue.empty:
+                        st.caption("Ajoute d'abord des articles dans l'onglet Catalogue.")
+                    else:
+                        with st.form("form_flash_sale"):
+                            produit_flash = st.selectbox(
+                                "Article", df_catalogue["nom"].dropna().tolist(), key="flash_produit_choisi"
+                            )
+                            ligne_flash = df_catalogue[df_catalogue["nom"] == produit_flash].iloc[0]
+                            prix_flash = st.number_input(
+                                "Prix flash (FCFA)", min_value=0.0,
+                                value=float(ligne_flash.get("prix_promo") or 0) or float(ligne_flash.get("prix") or 0),
+                                step=500.0,
+                            )
+                            col_date, col_heure = st.columns(2)
+                            date_fin_flash = col_date.date_input("Date de fin", value=datetime.now().date())
+                            heure_fin_flash = col_heure.time_input("Heure de fin", value=datetime.now().time().replace(second=0, microsecond=0))
+                            desactiver_flash = st.checkbox("Désactiver le flash sale sur cet article")
+                            if st.form_submit_button("⚡ Lancer / mettre à jour le flash sale"):
+                                if desactiver_flash:
+                                    maj_flash = {"prix_promo": None, "promo_expire_le": None}
+                                else:
+                                    fin_datetime = datetime.combine(date_fin_flash, heure_fin_flash).replace(tzinfo=timezone.utc)
+                                    maj_flash = {
+                                        "prix_promo": prix_flash,
+                                        "promo_expire_le": fin_datetime.isoformat(),
+                                    }
+                                try:
+                                    sb_admin.table("catalogue").update(maj_flash).eq("id", ligne_flash["id"]).eq("marchand_id", MARCHAND_ID).execute()
+                                except Exception:
+                                    logger.exception("Échec enregistrement flash sale")
+                                    st.error("❌ L'enregistrement a échoué. Réessaie dans un instant.")
+                                else:
+                                    forcer_rafraichissement()
+                                    st.success("Flash sale désactivé." if desactiver_flash else "Flash sale enregistré.")
+                                    st.rerun()
+
+                    st.divider()
+                    st.markdown("#### ⭐ Collections temporaires")
+                    st.caption(
+                        "Une collection expire d'elle-même après le nombre de jours choisi "
+                        "-- elle disparaît alors du filtre de la boutique, effet d'exclusivité."
+                    )
+                    with st.form("form_nouvelle_collection", clear_on_submit=True):
+                        nom_collection = st.text_input("Nom de la collection", placeholder="Ex : Collection Ramadan")
+                        description_collection = st.text_area("Description (facultatif)")
+                        duree_jours = st.number_input(
+                            "Disparaît après combien de jours ? (0 = jamais)", min_value=0, value=7
+                        )
+                        if st.form_submit_button("➕ Créer la collection"):
+                            if not nom_collection.strip():
+                                st.warning("Merci de donner un nom à la collection.")
+                            else:
+                                expire_le = (
+                                    (datetime.now(timezone.utc) + pd.Timedelta(days=int(duree_jours))).isoformat()
+                                    if duree_jours > 0 else None
+                                )
+                                try:
+                                    sb_admin.table("collections").insert({
+                                        "marchand_id": MARCHAND_ID,
+                                        "nom": nom_collection.strip(),
+                                        "description": description_collection.strip() or None,
+                                        "expire_le": expire_le,
+                                        "actif": True,
+                                    }).execute()
+                                except Exception:
+                                    logger.exception("Échec création collection")
+                                    st.error("❌ La création a échoué. Réessaie dans un instant.")
+                                else:
+                                    forcer_rafraichissement()
+                                    st.success("Collection créée.")
+                                    st.rerun()
+
+                    collections_du_marchand = charger_collections(MARCHAND_ID, st.session_state.refresh_token)
+                    if collections_du_marchand:
+                        st.markdown("##### Tes collections")
+                        for coll in collections_du_marchand:
+                            statut_coll = "🟢 Active" if coll.get("actif") else "⚪ Désactivée"
+                            if coll not in collections_actives_non_expirees(collections_du_marchand):
+                                statut_coll = "⏳ Expirée" if coll.get("actif") else "⚪ Désactivée"
+                            col_nom_coll, col_action_coll = st.columns([3, 1])
+                            col_nom_coll.write(f"**{coll['nom']}** — {statut_coll}")
+                            if col_action_coll.button("🗑️ Supprimer", key=f"suppr_coll_{coll['id']}"):
+                                sb_admin.table("collections").delete().eq("id", coll["id"]).execute()
+                                forcer_rafraichissement()
+                                st.rerun()
+
+                        st.markdown("##### Assigner des articles à une collection")
+                        noms_coll_actives = {c["nom"]: c["id"] for c in collections_du_marchand}
+                        collection_cible = st.selectbox("Collection", list(noms_coll_actives.keys()), key="collection_cible_assign")
+                        articles_a_assigner = st.multiselect(
+                            "Articles à ajouter à cette collection",
+                            df_catalogue["nom"].dropna().tolist(), key="articles_assign_collection"
+                        )
+                        if st.button("💾 Assigner à la collection", key="assigner_collection_bouton"):
+                            ids_articles = df_catalogue[df_catalogue["nom"].isin(articles_a_assigner)]["id"].tolist()
+                            if ids_articles:
+                                sb_admin.table("catalogue").update(
+                                    {"collection_id": noms_coll_actives[collection_cible]}
+                                ).in_("id", ids_articles).eq("marchand_id", MARCHAND_ID).execute()
+                                forcer_rafraichissement()
+                                st.success(f"{len(ids_articles)} article(s) ajouté(s) à « {collection_cible} ».")
+                                st.rerun()
+
+                # ---- Club VIP ----
+                with sous_tab_vip:
+                    st.markdown("#### 👑 Offre exclusive Club VIP")
+                    st.caption("Visible uniquement par les clients reconnus comme VIP sur ta boutique.")
+                    with st.form("form_offre_vip"):
+                        vip_actif_input = st.checkbox("Activer l'offre VIP", value=bool(config.get("vip_offre_actif")))
+                        vip_titre_input = st.text_input(
+                            "Titre de l'offre", value=config.get("vip_offre_titre") or "",
+                            placeholder="Ex : Merci pour votre fidélité !"
+                        )
+                        vip_texte_input = st.text_area(
+                            "Texte de l'offre", value=config.get("vip_offre_texte") or "",
+                            placeholder="Ex : -15% sur votre prochaine commande, réservé à nos clients VIP."
+                        )
+                        vip_code_input = st.text_input(
+                            "Code promo VIP (facultatif)", value=config.get("vip_offre_code") or ""
+                        )
+                        if st.form_submit_button("💾 Enregistrer l'offre VIP"):
+                            if vip_actif_input and not vip_titre_input.strip():
+                                st.warning("Ajoute au moins un titre avant d'activer l'offre VIP.")
+                            else:
+                                try:
+                                    sb_admin.table("marchands").update({
+                                        "vip_offre_actif": vip_actif_input,
+                                        "vip_offre_titre": vip_titre_input.strip() or None,
+                                        "vip_offre_texte": vip_texte_input.strip() or None,
+                                        "vip_offre_code": vip_code_input.strip() or None,
+                                    }).eq("id", MARCHAND_ID).execute()
+                                except Exception:
+                                    logger.exception("Échec enregistrement offre VIP")
+                                    st.error("❌ L'enregistrement a échoué. Réessaie dans un instant.")
+                                else:
+                                    forcer_rafraichissement()
+                                    st.success("Offre VIP mise à jour.")
+                                    st.rerun()
+
+                    st.divider()
+                    st.markdown("#### Membres du Club VIP")
+                    with st.form("form_ajout_vip", clear_on_submit=True):
+                        nom_vip = st.text_input("Nom du client")
+                        tel_vip = st.text_input("Téléphone")
+                        if st.form_submit_button("➕ Ajouter au Club VIP"):
+                            tel_vip_normalise = re.sub(r"\D", "", tel_vip or "")
+                            if not tel_vip_normalise:
+                                st.warning("Merci de renseigner un numéro de téléphone.")
+                            else:
+                                try:
+                                    sb_admin.table("clients_vip").upsert({
+                                        "marchand_id": MARCHAND_ID,
+                                        "telephone": tel_vip_normalise,
+                                        "nom": nom_vip.strip() or None,
+                                    }, on_conflict="marchand_id,telephone").execute()
+                                except Exception:
+                                    logger.exception("Échec ajout client VIP")
+                                    st.error("❌ L'ajout a échoué. Réessaie dans un instant.")
+                                else:
+                                    st.success("Client ajouté au Club VIP.")
+                                    st.rerun()
+
+                    reponse_vip_liste = (
+                        sb_admin.table("clients_vip")
+                        .select("id, nom, telephone")
+                        .eq("marchand_id", MARCHAND_ID)
+                        .order("ajoute_le", desc=True)
+                        .execute()
+                    )
+                    membres_vip = reponse_vip_liste.data or []
+                    if not membres_vip:
+                        st.caption("Aucun membre VIP pour le moment.")
+                    else:
+                        for membre in membres_vip:
+                            col_membre, col_suppr_membre = st.columns([3, 1])
+                            col_membre.write(f"👑 {membre.get('nom') or 'Client'} — {membre['telephone']}")
+                            if col_suppr_membre.button("🗑️", key=f"suppr_vip_{membre['id']}"):
+                                sb_admin.table("clients_vip").delete().eq("id", membre["id"]).execute()
+                                st.rerun()
+
+                # ---- Mise en vedette dans la vitrine commune ----
+                with sous_tab_vedette:
+                    st.caption(
+                        "Une boutique en vedette apparaît dans la vitrine commune de la "
+                        "marketplace, visible par tous les visiteurs à la recherche d'une "
+                        "boutique — une publicité gratuite en plus de ta propre boutique."
+                    )
+                    with st.form("form_en_vedette"):
+                        en_vedette_input = st.checkbox(
+                            "Apparaître dans la vitrine commune",
+                            value=bool(config.get("en_vedette"))
+                        )
+                        if st.form_submit_button("💾 Enregistrer"):
+                            try:
+                                sb_admin.table("marchands").update({
+                                    "en_vedette": en_vedette_input,
+                                }).eq("id", MARCHAND_ID).execute()
+                            except Exception:
+                                logger.exception("Échec enregistrement mise en vedette")
+                                st.error("❌ L'enregistrement a échoué. Réessaie dans un instant.")
+                            else:
+                                forcer_rafraichissement()
+                                st.success("Préférence de mise en vedette enregistrée.")
+                                st.rerun()
+
+                # ---- Diffusion WhatsApp vers les anciens clients ----
+                with sous_tab_diffusion:
+                    st.caption(
+                        "Compose un message, puis clique sur chaque client pour lui "
+                        "envoyer via WhatsApp (ouvre une conversation pré-remplie -- "
+                        "l'envoi reste manuel, un clic par client, WhatsApp ne permettant "
+                        "pas l'envoi groupé automatique sans une API Business payante)."
+                    )
+                    message_diffusion = st.text_area(
+                        "Message à diffuser",
+                        placeholder=f"Ex : Nouvelle collection disponible chez {config.get('nom_boutique', 'notre boutique')} !",
+                        key="message_diffusion_marketing"
+                    )
+                    reponse_clients = (
+                        sb_admin.table("commandes")
+                        .select("client_nom, tel")
+                        .eq("marchand_id", MARCHAND_ID)
+                        .order("date", desc=True)
+                        .limit(200)
+                        .execute()
+                    )
+                    clients_vus = {}
+                    for cmd_client in (reponse_clients.data or []):
+                        tel_client = re.sub(r"\D", "", str(cmd_client.get("tel") or ""))
+                        if tel_client and tel_client not in clients_vus:
+                            clients_vus[tel_client] = cmd_client.get("client_nom") or "Client"
+
+                    if not clients_vus:
+                        st.caption("Aucun client avec un numéro de téléphone dans les commandes pour le moment.")
+                    elif not message_diffusion.strip():
+                        st.caption(f"{len(clients_vus)} client(s) trouvé(s) — écris un message ci-dessus pour générer les liens.")
+                    else:
+                        st.write(f"**{len(clients_vus)} client(s)** — clique pour envoyer à chacun :")
+                        texte_encode = requests.utils.quote(message_diffusion)
+                        for tel_client, nom_client in clients_vus.items():
+                            col_nom, col_bouton = st.columns([3, 2])
+                            col_nom.write(f"📞 {nom_client} — {tel_client}")
+                            col_bouton.link_button(
+                                "💬 WhatsApp",
+                                f"https://wa.me/{tel_client}?text={texte_encode}",
+                                key=f"diffusion_wa_{tel_client}"
+                            )
