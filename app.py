@@ -334,8 +334,59 @@ st.markdown("""
         border-radius: 20px;
         font-size: 0.87rem;
     }
+
+    /* 🔍 Lightbox plein écran (zoom image produit) -- voir
+       injecter_lightbox_global() plus bas pour le HTML/JS associé. */
+    #dlc-lightbox {
+        display: none; position: fixed; inset: 0; z-index: 9999;
+        background: rgba(8,8,10,0.94);
+        align-items: center; justify-content: center;
+        padding: 24px; box-sizing: border-box;
+        cursor: zoom-out;
+    }
+    #dlc-lightbox.dlc-visible { display: flex; }
+    #dlc-lightbox img {
+        max-width: 100%; max-height: 100%; border-radius: 10px;
+        box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+        cursor: default;
+    }
+    #dlc-lightbox .dlc-fermer {
+        position: fixed; top: 18px; right: 22px;
+        color: #eae4d8; font-size: 2rem; line-height: 1; cursor: pointer;
+        background: rgba(0,0,0,0.4); border-radius: 50%;
+        width: 42px; height: 42px; display: flex; align-items: center; justify-content: center;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+# 🔍 Overlay du lightbox -- un seul par page, réutilisé par toutes les
+# images produit (galerie multi-photos ou photo unique). Les images vivent
+# dans des iframes (components.html), qui communiquent avec cet overlay du
+# document principal via window.parent.postMessage -- window.parent pointe
+# vers le document principal lui-même quand on l'appelle depuis celui-ci
+# (photo unique), donc le même mécanisme fonctionne dans les deux cas.
+st.markdown(
+    """
+    <div id="dlc-lightbox" onclick="this.classList.remove('dlc-visible')">
+        <span class="dlc-fermer">✕</span>
+        <img id="dlc-lightbox-img" src="" onclick="event.stopPropagation()">
+    </div>
+    <script>
+    (function() {
+        if (window._dlcLightboxInit) return;
+        window._dlcLightboxInit = true;
+        window.addEventListener("message", function(evenement) {
+            const donnees = evenement.data || {};
+            if (donnees.type === "dlc-zoom" && donnees.src) {
+                document.getElementById("dlc-lightbox-img").src = donnees.src;
+                document.getElementById("dlc-lightbox").classList.add("dlc-visible");
+            }
+        });
+    })();
+    </script>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ====================== 1. SECRETS ======================
 # 🔒 FIX : après un très long aller-retour infructueux avec Supabase Auth
@@ -699,19 +750,35 @@ def televerser_image_imgbb(fichier):
 
 
 # ====================== 3bis. GALERIE PHOTOS AVEC GLISSEMENT (SWIPE) ======================
+def afficher_image_zoomable(url, hauteur=280):
+    """Affiche une seule photo produit, cliquable pour l'ouvrir en plein
+    écran via le lightbox global. Rendue directement dans la page
+    principale (pas dans un iframe components.html), donc window.parent
+    ici pointe vers la page elle-même -- même mécanisme que la galerie."""
+    st.markdown(
+        f'<img src="{html_lib.escape(url, quote=True)}" loading="lazy" '
+        f'style="width:100%; height:{hauteur}px; object-fit:cover; border-radius:12px; '
+        f'display:block; cursor:zoom-in;" '
+        f'onclick="window.parent.postMessage({{type:\'dlc-zoom\', src: this.src}}, \'*\')">',
+        unsafe_allow_html=True,
+    )
+
+
 def afficher_galerie_swipe(images, hauteur=280, cle=""):
     """Affiche une galerie photo qu'on peut faire glisser au doigt (mobile) ou
     à la souris pour passer d'une image à l'autre, avec des points cliquables
-    en complément sur ordinateur."""
+    en complément sur ordinateur. Un clic/tap sur la photo l'ouvre en plein
+    écran (zoom) via le lightbox global -- voir injecter_lightbox_global."""
     images = [u for u in images if u]
     if not images:
         return
     if len(images) == 1:
-        st.image(images[0], use_container_width=True)
+        afficher_image_zoomable(images[0], hauteur=hauteur)
         return
 
     diapositives = "".join(
-        f'<div class="dlc-slide"><img src="{html_lib.escape(u, quote=True)}" loading="lazy"></div>'
+        f'<div class="dlc-slide"><img src="{html_lib.escape(u, quote=True)}" loading="lazy" '
+        f'onclick="window.parent.postMessage({{type:\'dlc-zoom\', src: this.src}}, \'*\')"></div>'
         for u in images
     )
     points = "".join(f'<span class="dlc-dot" data-i="{i}"></span>' for i in range(len(images)))
@@ -735,6 +802,7 @@ def afficher_galerie_swipe(images, hauteur=280, cle=""):
       }}
       #{id_composant} .dlc-slide img {{
         width:100%; height:{hauteur}px; object-fit:cover; border-radius:12px; display:block;
+        cursor: zoom-in;
       }}
       #{id_composant} .dlc-dots {{ display:flex; justify-content:center; gap:6px; margin-top:6px; }}
       #{id_composant} .dlc-dot {{
@@ -817,6 +885,42 @@ def bouton_partager(titre_produit, texte_partage, slug_boutique, produit_id, cle
             }} catch (e2) {{
               window.prompt("Copie ce lien pour le partager :", lien);
             }}
+          }}
+        }});
+      }})();
+    </script>
+    """
+    components.html(code_html, height=46, scrolling=False)
+
+
+def bouton_copier_texte(texte, cle, libelle="📋 Copier le texte"):
+    """Petit bouton qui copie `texte` dans le presse-papier, avec repli sur
+    une fenêtre "copier ce texte" si le presse-papier est bloqué par le
+    navigateur (mêmes limites que bouton_partager)."""
+    id_bouton = f"dlc-copier-{re.sub(r'[^a-zA-Z0-9_-]', '', str(cle))}"
+    texte_js = json.dumps(str(texte))
+    libelle_js = json.dumps(str(libelle))
+    code_html = f"""
+    <button id="{id_bouton}" class="dlc-btn-partage">{html_lib.escape(libelle)}</button>
+    <style>
+      .dlc-btn-partage {{
+        width:100%; padding:0.45rem 0.6rem; border-radius:8px;
+        border:1px solid #c9a35c; background:transparent; color:#c9a35c;
+        font-family:'Inter',sans-serif; font-weight:500; font-size:0.95rem;
+        cursor:pointer; transition:all 0.2s ease; white-space:nowrap;
+      }}
+      .dlc-btn-partage:hover {{ background:#c9a35c; color:#16151a; }}
+    </style>
+    <script>
+      (function() {{
+        const bouton = document.getElementById("{id_bouton}");
+        bouton.addEventListener("click", async function() {{
+          try {{
+            await navigator.clipboard.writeText({texte_js});
+            bouton.textContent = "✅ Copié !";
+            setTimeout(() => {{ bouton.textContent = {libelle_js}; }}, 2000);
+          }} catch (e) {{
+            window.prompt("Copie ce texte :", {texte_js});
           }}
         }});
       }})();
@@ -3017,12 +3121,37 @@ else:
                                 st.session_state["ia_post_genere"] = texte_post
 
                         if st.session_state.get("ia_post_genere"):
-                            st.text_area(
+                            texte_post_genere = st.text_area(
                                 "Post généré (copie-colle sur tes réseaux)",
                                 value=st.session_state["ia_post_genere"],
                                 key="ia_post_editable",
                                 height=160,
                             )
+                            # 📌 Limite technique honnête : WhatsApp accepte un texte
+                            # pré-rempli via wa.me, mais ni Facebook ni Instagram ne
+                            # permettent d'ouvrir un post déjà rédigé depuis un simple
+                            # lien web (ce n'est pas une limitation de l'app -- ces
+                            # plateformes ne l'autorisent tout simplement pas sans leur
+                            # API officielle de publication). On copie donc le texte
+                            # dans le presse-papier et on ouvre la plateforme visée,
+                            # pour qu'il ne reste qu'à coller.
+                            st.caption(
+                                "WhatsApp ouvre directement avec le texte prêt. Pour Facebook et "
+                                "Instagram (qui ne permettent pas de pré-remplir un post depuis un "
+                                "lien web), le texte est copié -- il ne reste qu'à le coller."
+                            )
+                            col_wa, col_fb, col_ig = st.columns(3)
+                            with col_wa:
+                                st.link_button(
+                                    "💬 WhatsApp", f"https://wa.me/?text={requests.utils.quote(texte_post_genere)}",
+                                    use_container_width=True
+                                )
+                            with col_fb:
+                                bouton_copier_texte(texte_post_genere, cle="ia_post_fb", libelle="📘 Copier pour Facebook")
+                                st.link_button("Ouvrir Facebook", "https://www.facebook.com/", use_container_width=True)
+                            with col_ig:
+                                bouton_copier_texte(texte_post_genere, cle="ia_post_ig", libelle="📸 Copier pour Instagram")
+                                st.link_button("Ouvrir Instagram", "https://www.instagram.com/", use_container_width=True)
 
                         st.divider()
                         st.markdown("#### 🔁 Tunnel de vente WhatsApp")
