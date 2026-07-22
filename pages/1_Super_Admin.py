@@ -28,6 +28,15 @@ from supabase import create_client, Client
 #     add column if not exists telephone_marchand text,
 #     add column if not exists adresse_marchand text;
 #
+# 📣 COLONNES REQUISES pour le module Marketing & Pub (voir aussi app.py) :
+#   alter table public.marchands
+#     add column if not exists palier_abonnement text not null default 'standard',
+#     add column if not exists en_vedette boolean not null default false,
+#     add column if not exists banniere_actif boolean not null default false,
+#     add column if not exists banniere_titre text,
+#     add column if not exists banniere_texte text,
+#     add column if not exists banniere_code_promo text;
+#
 # 📱 Sur mobile : cette page apparaît automatiquement dans le menu ☰
 # (barre de navigation Streamlit multipage) puisqu'elle est dans le
 # dossier pages/. Tu peux aussi "Ajouter à l'écran d'accueil" depuis ton
@@ -51,6 +60,17 @@ LABELS_STATUT = {
     "en_attente_paiement": "🟠 En attente de paiement",
     "suspendu": "🔴 Suspendu",
     "resilie": "⚫ Résilié",
+}
+
+# 📣 Palier d'abonnement -- contrôle l'accès au module Marketing & Pub de
+# chaque boutique (bannières promo, visuels réseaux sociaux, mise en
+# vedette dans la vitrine commune, diffusion WhatsApp). C'est TOI, ici dans
+# le Super Admin, qui passes une boutique en "premium" une fois le paiement
+# du module reçu -- rien n'est débloqué automatiquement côté marchand.
+PALIERS = ["standard", "premium"]
+LABELS_PALIER = {
+    "standard": "⬜ Standard (sans module Marketing & Pub)",
+    "premium": "✨ Premium (module Marketing & Pub activé)",
 }
 
 SEUIL_TENTATIVES = 5
@@ -166,7 +186,10 @@ for m in marchands:
     statut = m.get("statut_abonnement", "")
     with st.container(border=True):
         st.markdown(f"**{m.get('nom_boutique', 'Sans nom')}** — `{m.get('slug')}`")
-        st.markdown(LABELS_STATUT.get(statut, statut))
+        ligne_statut = LABELS_STATUT.get(statut, statut)
+        if (m.get("palier_abonnement") or "standard") == "premium":
+            ligne_statut += "  ·  ✨ Premium"
+        st.markdown(ligne_statut)
 
         # Coordonnées du marchand, affichées si renseignées
         nom_marchand = m.get("nom_marchand")
@@ -183,6 +206,7 @@ for m in marchands:
             st.caption("Aucune coordonnée renseignée pour ce marchand.")
 
         # ---- Changer le statut : sélecteur explicite + bouton, pas de doute possible ----
+        palier_actuel = m.get("palier_abonnement") or "standard"
         with st.form(f"statut_{m['id']}"):
             nouveau_statut_choisi = st.selectbox(
                 "Statut de la boutique",
@@ -191,11 +215,23 @@ for m in marchands:
                 format_func=lambda s: LABELS_STATUT.get(s, s),
                 key=f"select_statut_{m['id']}",
             )
-            if st.form_submit_button("💾 Enregistrer le statut"):
-                sb.table("marchands").update(
-                    {"statut_abonnement": nouveau_statut_choisi}
-                ).eq("id", m["id"]).execute()
-                st.success(f"Statut mis à jour : {LABELS_STATUT.get(nouveau_statut_choisi, nouveau_statut_choisi)}")
+            nouveau_palier_choisi = st.selectbox(
+                "Palier d'abonnement",
+                PALIERS,
+                index=PALIERS.index(palier_actuel) if palier_actuel in PALIERS else 0,
+                format_func=lambda p: LABELS_PALIER.get(p, p),
+                key=f"select_palier_{m['id']}",
+                help="Passe la boutique en Premium une fois le paiement du module Marketing & Pub reçu.",
+            )
+            if st.form_submit_button("💾 Enregistrer"):
+                sb.table("marchands").update({
+                    "statut_abonnement": nouveau_statut_choisi,
+                    "palier_abonnement": nouveau_palier_choisi,
+                }).eq("id", m["id"]).execute()
+                st.success(
+                    f"Statut : {LABELS_STATUT.get(nouveau_statut_choisi, nouveau_statut_choisi)} — "
+                    f"Palier : {LABELS_PALIER.get(nouveau_palier_choisi, nouveau_palier_choisi)}"
+                )
                 st.rerun()
 
         # ---- Coordonnées du marchand ----
