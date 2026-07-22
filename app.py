@@ -999,29 +999,20 @@ def sauvegarder_panier_abandonne(tel, nom, articles):
     if st.session_state.dernier_panier_signature == signature:
         return  # rien de changé depuis la dernière sauvegarde, on évite une écriture inutile
 
-    maintenant = datetime.now(timezone.utc).isoformat()
-    donnees = {
-        "date_derniere_maj": maintenant,
-        "client_nom": nom,
-        "telephone": tel,
-        "articles": [{"nom": a["nom"], "prix": a["prix"], "quantite": a["quantite"]} for a in articles],
-        "total": total,
-        "statut": "en_attente",
-        "marchand_id": MARCHAND_ID
-    }
+    # 🐛 CORRECTIF : passait avant par sb.table(...).insert/update() avec la
+    # clé anonyme -- très probablement bloqué en silence par le RLS (le
+    # except: pass ci-dessous avalait l'erreur), exactement comme pour
+    # "alertesstock" avant sa migration vers une fonction RPC. On applique
+    # ici le même remède : passer par une fonction RPC SECURITY DEFINER
+    # (voir correctif_avis_paniers.sql -- "enregistrer_panier_abandonne").
     try:
-        existant = (
-            sb.table("paniersabandonnés")
-            .select("telephone")
-            .eq("telephone", tel)
-            .eq("marchand_id", MARCHAND_ID)
-            .execute()
-        )
-        if existant.data:
-            sb.table("paniersabandonnés").update(donnees).eq("telephone", tel).eq("marchand_id", MARCHAND_ID).execute()
-        else:
-            donnees["date_creation"] = maintenant
-            sb.table("paniersabandonnés").insert(donnees).execute()
+        sb.rpc("enregistrer_panier_abandonne", {
+            "p_telephone": tel,
+            "p_client_nom": nom,
+            "p_articles": [{"nom": a["nom"], "prix": a["prix"], "quantite": a["quantite"]} for a in articles],
+            "p_total": total,
+            "p_marchand_id": MARCHAND_ID
+        }).execute()
         st.session_state.dernier_panier_signature = signature
     except Exception:
         pass  # la sauvegarde du panier abandonné est un bonus, jamais bloquant
@@ -1032,7 +1023,10 @@ def marquer_panier_converti(tel):
     if not tel:
         return
     try:
-        sb.table("paniersabandonnés").update({"statut": "converti"}).eq("telephone", tel).eq("marchand_id", MARCHAND_ID).execute()
+        sb.rpc("marquer_panier_converti", {
+            "p_telephone": tel,
+            "p_marchand_id": MARCHAND_ID
+        }).execute()
     except Exception:
         pass
 
@@ -1432,12 +1426,19 @@ if not mode_admin:
                                 elif not throttle(f"avis_{identifiant_produit}", 15):
                                     st.warning("Merci de patienter avant de renvoyer un avis.")
                                 else:
+                                    # 🐛 CORRECTIF : p_marchand_id manquait ici -- l'avis
+                                    # était bien enregistré côté Supabase, mais sans
+                                    # marchand_id (ou avec la mauvaise valeur), donc il
+                                    # n'apparaissait jamais dans l'onglet Avis de l'admin
+                                    # (qui filtre par marchand_id). Voir aussi la fonction
+                                    # SQL "laisser_avis" à mettre à jour en conséquence.
                                     resultat = sb.rpc("laisser_avis", {
                                         "p_article_id": identifiant_produit,
                                         "p_article_nom": str(row["nom"]),
                                         "p_client_nom": nom_avis.strip(),
                                         "p_note": int(note_avis),
-                                        "p_commentaire": commentaire_avis.strip()
+                                        "p_commentaire": commentaire_avis.strip(),
+                                        "p_marchand_id": MARCHAND_ID
                                     }).execute()
                                     donnee = resultat.data or {}
                                     if donnee.get("status") == "success":
