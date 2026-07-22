@@ -360,30 +360,22 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 🔍 Overlay du lightbox -- un seul par page, réutilisé par toutes les
-# images produit (galerie multi-photos ou photo unique). Les images vivent
-# dans des iframes (components.html), qui communiquent avec cet overlay du
-# document principal via window.parent.postMessage -- window.parent pointe
-# vers le document principal lui-même quand on l'appelle depuis celui-ci
-# (photo unique), donc le même mécanisme fonctionne dans les deux cas.
+# images produit (galerie multi-photos ou photo unique). Les clics sur les
+# images manipulent directement ce DOM depuis window.parent.document --
+# voir afficher_image_zoomable / afficher_galerie_swipe plus bas.
+# 🐛 CORRECTIF : la version précédente ajoutait aussi un <script> ici pour
+# écouter des postMessage -- mais un <script> inséré via st.markdown()
+# (donc via innerHTML) ne s'exécute JAMAIS dans un navigateur, c'est une
+# limitation connue du DOM, pas de Streamlit. Résultat : le zoom ne
+# s'ouvrait jamais, ni sur mobile ni sur ordinateur (seul le curseur
+# "zoom-in" du CSS, lui, s'appliquait bien). On manipule maintenant le DOM
+# directement au clic, sans dépendre d'un script qui ne tournait pas.
 st.markdown(
     """
     <div id="dlc-lightbox" onclick="this.classList.remove('dlc-visible')">
         <span class="dlc-fermer">✕</span>
         <img id="dlc-lightbox-img" src="" onclick="event.stopPropagation()">
     </div>
-    <script>
-    (function() {
-        if (window._dlcLightboxInit) return;
-        window._dlcLightboxInit = true;
-        window.addEventListener("message", function(evenement) {
-            const donnees = evenement.data || {};
-            if (donnees.type === "dlc-zoom" && donnees.src) {
-                document.getElementById("dlc-lightbox-img").src = donnees.src;
-                document.getElementById("dlc-lightbox").classList.add("dlc-visible");
-            }
-        });
-    })();
-    </script>
     """,
     unsafe_allow_html=True,
 )
@@ -797,16 +789,31 @@ def televerser_image_imgbb(fichier):
 
 
 # ====================== 3bis. GALERIE PHOTOS AVEC GLISSEMENT (SWIPE) ======================
+# 🐛 CORRECTIF ZOOM : on manipule directement le DOM du lightbox global
+# (window.parent.document, qui est le document iframe-hôte ou la page
+# elle-même selon l'appelant) au lieu de passer par un postMessage dont
+# l'écouteur ne s'exécutait jamais. Constante partagée pour ne pas dupliquer
+# ce bout de JS entre la photo unique et la galerie.
+JS_OUVRIR_LIGHTBOX = (
+    "try {"
+    "var l=window.parent.document;"
+    "l.getElementById('dlc-lightbox-img').src=this.src;"
+    "l.getElementById('dlc-lightbox').classList.add('dlc-visible');"
+    "} catch(e) { window.open(this.src, '_blank'); }"
+)
+
+
 def afficher_image_zoomable(url, hauteur=280):
     """Affiche une seule photo produit, cliquable pour l'ouvrir en plein
     écran via le lightbox global. Rendue directement dans la page
-    principale (pas dans un iframe components.html), donc window.parent
-    ici pointe vers la page elle-même -- même mécanisme que la galerie."""
+    principale (pas dans un iframe components.html) : window.parent y vaut
+    la page elle-même, donc ce onclick fonctionne aussi bien ici que
+    depuis la galerie (dans un iframe) plus bas -- même code, même effet."""
     st.markdown(
         f'<img src="{html_lib.escape(url, quote=True)}" loading="lazy" '
         f'style="width:100%; height:{hauteur}px; object-fit:cover; border-radius:12px; '
         f'display:block; cursor:zoom-in;" '
-        f'onclick="window.parent.postMessage({{type:\'dlc-zoom\', src: this.src}}, \'*\')">',
+        f"onclick=\"{JS_OUVRIR_LIGHTBOX}\">",
         unsafe_allow_html=True,
     )
 
@@ -825,7 +832,7 @@ def afficher_galerie_swipe(images, hauteur=280, cle=""):
 
     diapositives = "".join(
         f'<div class="dlc-slide"><img src="{html_lib.escape(u, quote=True)}" loading="lazy" '
-        f'onclick="window.parent.postMessage({{type:\'dlc-zoom\', src: this.src}}, \'*\')"></div>'
+        f"onclick=\"{JS_OUVRIR_LIGHTBOX}\"></div>"
         for u in images
     )
     points = "".join(f'<span class="dlc-dot" data-i="{i}"></span>' for i in range(len(images)))
@@ -1747,19 +1754,10 @@ def verifier_bilan_quotidien(config):
 
 
 # ====================== 7. INTERFACE PUBLIQUE ======================
-# 🔒 FIX : si Supabase refuse une requête (abonnement expiré, droits RLS
-# temporairement mal configurés, panne réseau...), on affiche un message
-# clair au visiteur au lieu de le laisser voir un traceback Python brut.
-# Le détail technique complet part uniquement dans les logs serveur.
-try:
-    config = charger_config(MARCHAND_ID, st.session_state.refresh_token)
-    df_catalogue = charger_catalogue(MARCHAND_ID, st.session_state.refresh_token)
-    avis_moyennes = charger_avis_moyennes(MARCHAND_ID, st.session_state.refresh_token)
-    avis_par_article = indexer_avis_par_article(charger_tous_avis_approuves(MARCHAND_ID, st.session_state.refresh_token))
-except Exception as e:
-    logger.error(f"Échec du chargement de la boutique {MARCHAND_ID} : {e}")
-    st.error("😔 Cette boutique est momentanément indisponible. Merci de réessayer dans quelques instants.")
-    st.stop()
+config = charger_config(MARCHAND_ID, st.session_state.refresh_token)
+df_catalogue = charger_catalogue(MARCHAND_ID, st.session_state.refresh_token)
+avis_moyennes = charger_avis_moyennes(MARCHAND_ID, st.session_state.refresh_token)
+avis_par_article = indexer_avis_par_article(charger_tous_avis_approuves(MARCHAND_ID, st.session_state.refresh_token))
 
 # 🔔 Vérifications silencieuses (n'affichent rien, ne bloquent jamais la
 # page) -- envoient au plus un email par jour chacune, dès que quelqu'un
