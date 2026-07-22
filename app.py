@@ -348,7 +348,7 @@ st.markdown("""
     #dlc-lightbox img {
         max-width: 100%; max-height: 100%; border-radius: 10px;
         box-shadow: 0 8px 40px rgba(0,0,0,0.6);
-        cursor: default;
+        cursor: zoom-out;
     }
     #dlc-lightbox .dlc-fermer {
         position: fixed; top: 18px; right: 22px;
@@ -360,21 +360,25 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 🔍 Overlay du lightbox -- un seul par page, réutilisé par toutes les
-# images produit (galerie multi-photos ou photo unique). Les clics sur les
-# images manipulent directement ce DOM depuis window.parent.document --
-# voir afficher_image_zoomable / afficher_galerie_swipe plus bas.
-# 🐛 CORRECTIF : la version précédente ajoutait aussi un <script> ici pour
+# images produit. Toutes les photos (galerie ou photo unique) sont
+# maintenant rendues via le même composant iframe (afficher_galerie_swipe)
+# dont le clic manipule directement window.parent.document pour afficher
+# cet overlay -- voir JS_OUVRIR_LIGHTBOX plus bas pour le détail.
+# 🐛 CORRECTIF 1 : la version précédente ajoutait aussi un <script> ici pour
 # écouter des postMessage -- mais un <script> inséré via st.markdown()
 # (donc via innerHTML) ne s'exécute JAMAIS dans un navigateur, c'est une
 # limitation connue du DOM, pas de Streamlit. Résultat : le zoom ne
 # s'ouvrait jamais, ni sur mobile ni sur ordinateur (seul le curseur
 # "zoom-in" du CSS, lui, s'appliquait bien). On manipule maintenant le DOM
 # directement au clic, sans dépendre d'un script qui ne tournait pas.
+# 🐛 CORRECTIF 2 : la photo elle-même bloquait la fermeture (stopPropagation)
+# -- un tap dessus, très naturel pour "revenir en arrière", ne faisait
+# donc rien. On tape maintenant N'IMPORTE OÙ (photo comprise) pour fermer.
 st.markdown(
     """
     <div id="dlc-lightbox" onclick="this.classList.remove('dlc-visible')">
         <span class="dlc-fermer">✕</span>
-        <img id="dlc-lightbox-img" src="" onclick="event.stopPropagation()">
+        <img id="dlc-lightbox-img" src="">
     </div>
     """,
     unsafe_allow_html=True,
@@ -803,31 +807,22 @@ JS_OUVRIR_LIGHTBOX = (
 )
 
 
-def afficher_image_zoomable(url, hauteur=280):
-    """Affiche une seule photo produit, cliquable pour l'ouvrir en plein
-    écran via le lightbox global. Rendue directement dans la page
-    principale (pas dans un iframe components.html) : window.parent y vaut
-    la page elle-même, donc ce onclick fonctionne aussi bien ici que
-    depuis la galerie (dans un iframe) plus bas -- même code, même effet."""
-    st.markdown(
-        f'<img src="{html_lib.escape(url, quote=True)}" loading="lazy" '
-        f'style="width:100%; height:{hauteur}px; object-fit:cover; border-radius:12px; '
-        f'display:block; cursor:zoom-in;" '
-        f"onclick=\"{JS_OUVRIR_LIGHTBOX}\">",
-        unsafe_allow_html=True,
-    )
-
-
 def afficher_galerie_swipe(images, hauteur=280, cle=""):
     """Affiche une galerie photo qu'on peut faire glisser au doigt (mobile) ou
     à la souris pour passer d'une image à l'autre, avec des points cliquables
     en complément sur ordinateur. Un clic/tap sur la photo l'ouvre en plein
-    écran (zoom) via le lightbox global -- voir injecter_lightbox_global."""
+    écran (zoom) via le lightbox global.
+    🐛 CORRECTIF : une photo unique passait avant par afficher_image_zoomable
+    (rendue directement dans la page, hors iframe) -- son onclick ne
+    s'ouvrait jamais chez certains utilisateurs, alors que la galerie
+    (rendue dans un iframe components.html) fonctionnait. Cause exacte non
+    confirmée (probable ré-exécution du markdown lors des reruns Streamlit
+    qui perd le binding), mais plutôt que de maintenir deux mécanismes de
+    rendu différents pour le même clic, on utilise maintenant TOUJOURS ce
+    composant iframe, même pour une seule photo -- un seul chemin, déjà
+    confirmé fonctionnel, pour toutes les photos produit."""
     images = [u for u in images if u]
     if not images:
-        return
-    if len(images) == 1:
-        afficher_image_zoomable(images[0], hauteur=hauteur)
         return
 
     diapositives = "".join(
@@ -835,7 +830,10 @@ def afficher_galerie_swipe(images, hauteur=280, cle=""):
         f"onclick=\"{JS_OUVRIR_LIGHTBOX}\"></div>"
         for u in images
     )
-    points = "".join(f'<span class="dlc-dot" data-i="{i}"></span>' for i in range(len(images)))
+    points = (
+        "".join(f'<span class="dlc-dot" data-i="{i}"></span>' for i in range(len(images)))
+        if len(images) > 1 else ""
+    )
     id_composant = f"dlc-galerie-{re.sub(r'[^a-zA-Z0-9_-]', '', str(cle))}"
 
     code_html = f"""
