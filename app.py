@@ -691,27 +691,9 @@ def compresser_image_avant_envoi(contenu: bytes) -> bytes:
         return contenu
 
 
-def televerser_octets_imgbb(contenu: bytes, deja_compressee: bool = False):
-    """Envoie des octets d'image vers ImgBB.
-    Renvoie un tuple (url, erreur) : url vaut None en cas d'échec, et erreur
-    contient alors un message explicite (au lieu d'échouer silencieusement).
-    `deja_compressee=True` (venant du composant navigateur) évite de
-    recompresser inutilement une image déjà réduite côté client."""
-    if not contenu:
-        return None, None
-
-    if not est_image_valide(contenu):
-        return None, "Le fichier ne correspond pas à un format d'image valide (jpg/png/webp)."
-
-    taille_mo = len(contenu) / (1024 * 1024)
-    if taille_mo > TAILLE_MAX_IMAGE_MO:
-        return None, f"Fichier trop volumineux ({taille_mo:.1f} Mo, max {TAILLE_MAX_IMAGE_MO} Mo)."
-
-    if not deja_compressee:
-        contenu = compresser_image_avant_envoi(contenu)
-
+def _envoyer_vers_imgbb(image_b64: str):
+    """Retourne (url, erreur). erreur=None signifie succès."""
     try:
-        image_b64 = base64.b64encode(contenu).decode()
         reponse = requests.post(
             "https://api.imgbb.com/1/upload",
             data={"key": st.secrets["IMGBB_API_KEY"], "image": image_b64},
@@ -732,6 +714,71 @@ def televerser_octets_imgbb(contenu: bytes, deja_compressee: bool = False):
 
     message_erreur = (donnees.get("error") or {}).get("message", "erreur inconnue")
     return None, f"ImgBB a refusé l'image : {message_erreur} (code HTTP {reponse.status_code})."
+
+
+def _envoyer_vers_freeimage_host(image_b64: str):
+    """Hébergeur de secours (même famille d'API qu'ImgBB) -- utilisé
+    uniquement si ImgBB échoue. Retourne (url, erreur)."""
+    cle = _cle_secrete("FREEIMAGE_API_KEY")
+    if not cle:
+        return None, "Aucune clé FREEIMAGE_API_KEY configurée pour le secours."
+    try:
+        reponse = requests.post(
+            "https://freeimage.host/api/1/upload",
+            data={"key": cle, "source": image_b64, "format": "json"},
+            timeout=60
+        )
+    except requests.exceptions.Timeout:
+        return None, "Délai d'attente dépassé sur l'hébergeur de secours."
+    except requests.exceptions.RequestException as e:
+        return None, f"Erreur réseau lors de l'envoi vers l'hébergeur de secours : {e}"
+
+    try:
+        donnees = reponse.json()
+    except Exception:
+        return None, f"Réponse invalide de l'hébergeur de secours (code HTTP {reponse.status_code})."
+
+    if donnees.get("status_code") == 200 and donnees.get("image", {}).get("url"):
+        return donnees["image"]["url"], None
+
+    message_erreur = (donnees.get("error") or {}).get("message", "erreur inconnue")
+    return None, f"L'hébergeur de secours a refusé l'image : {message_erreur} (code HTTP {reponse.status_code})."
+
+
+def televerser_octets_imgbb(contenu: bytes, deja_compressee: bool = False):
+    """Envoie des octets d'image vers ImgBB, avec bascule automatique sur
+    freeimage.host (hébergeur de secours, même famille d'API) si ImgBB est
+    en panne ou refuse l'image -- pour que le marchand ne soit jamais
+    bloqué par une indisponibilité ponctuelle d'un seul service.
+    Renvoie un tuple (url, erreur) : url vaut None seulement si les DEUX
+    hébergeurs ont échoué, et erreur détaille alors les deux raisons.
+    `deja_compressee=True` (venant du composant navigateur) évite de
+    recompresser inutilement une image déjà réduite côté client."""
+    if not contenu:
+        return None, None
+
+    if not est_image_valide(contenu):
+        return None, "Le fichier ne correspond pas à un format d'image valide (jpg/png/webp)."
+
+    taille_mo = len(contenu) / (1024 * 1024)
+    if taille_mo > TAILLE_MAX_IMAGE_MO:
+        return None, f"Fichier trop volumineux ({taille_mo:.1f} Mo, max {TAILLE_MAX_IMAGE_MO} Mo)."
+
+    if not deja_compressee:
+        contenu = compresser_image_avant_envoi(contenu)
+
+    image_b64 = base64.b64encode(contenu).decode()
+
+    url, erreur_imgbb = _envoyer_vers_imgbb(image_b64)
+    if url:
+        return url, None
+
+    logger.warning(f"Échec ImgBB, bascule sur l'hébergeur de secours : {erreur_imgbb}")
+    url, erreur_secours = _envoyer_vers_freeimage_host(image_b64)
+    if url:
+        return url, None
+
+    return None, f"{erreur_imgbb} — Secours également indisponible : {erreur_secours}"
 
 
 def televerser_image_imgbb(fichier):
