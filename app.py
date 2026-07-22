@@ -1888,7 +1888,8 @@ if not mode_admin:
                         st.markdown(f'<span class="destiny-prix-normal">{int(prix)} FCFA</span>', unsafe_allow_html=True)
 
                     if row.get("description"):
-                        st.caption(str(row["description"]))
+                        with st.expander("📝 Description"):
+                            st.write(str(row["description"]))
 
                     # ❤️ Favoris -- disponible même en rupture de stock, pour
                     # que le client puisse quand même sauvegarder l'article et
@@ -2599,7 +2600,35 @@ else:
                     )
                     if st.button("Mettre à jour", key=f"maj_{cle_unique}"):
                         sb_admin.table("commandes").update({"statut": nouveau_statut}).eq("id", cmd["id"]).execute()
+                        # 🔔 Notifie le client du nouveau statut -- pas d'envoi
+                        # automatique possible sans API WhatsApp Business, donc
+                        # on prépare le message et on laisse un clic l'envoyer,
+                        # même mécanisme que les autres relances de l'app.
+                        st.session_state[f"notif_statut_{cle_unique}"] = nouveau_statut
                         st.rerun()
+
+                    if st.session_state.get(f"notif_statut_{cle_unique}"):
+                        tel_client_cmd = re.sub(r"\D", "", str(cmd.get("tel") or ""))
+                        statut_envoye = st.session_state[f"notif_statut_{cle_unique}"]
+                        messages_par_statut = {
+                            "En cours": f"Bonjour {cmd.get('client_nom') or ''}, votre commande chez {config.get('nom_boutique', 'notre boutique')} est en cours de préparation. Nous vous tiendrons informé(e) !",
+                            "Confirmée": f"Bonjour {cmd.get('client_nom') or ''}, bonne nouvelle : votre commande chez {config.get('nom_boutique', 'notre boutique')} est confirmée !",
+                            "Livrée": f"Bonjour {cmd.get('client_nom') or ''}, votre commande chez {config.get('nom_boutique', 'notre boutique')} a été livrée. Merci pour votre confiance !",
+                            "Annulée": f"Bonjour {cmd.get('client_nom') or ''}, votre commande chez {config.get('nom_boutique', 'notre boutique')} a été annulée. N'hésitez pas à nous contacter pour toute question.",
+                        }
+                        message_statut = st.text_area(
+                            "Message au client",
+                            value=messages_par_statut.get(statut_envoye, f"Le statut de votre commande a été mis à jour : {statut_envoye}."),
+                            key=f"texte_notif_{cle_unique}",
+                            height=90,
+                        )
+                        if tel_client_cmd:
+                            st.link_button(
+                                "💬 Notifier le client sur WhatsApp",
+                                f"https://wa.me/{tel_client_cmd}?text={requests.utils.quote(message_statut)}"
+                            )
+                        else:
+                            st.caption("Aucun numéro de téléphone enregistré pour cette commande.")
 
         with tab_avis:
             st.markdown("#### 🕓 En attente de validation")
