@@ -1747,10 +1747,19 @@ def verifier_bilan_quotidien(config):
 
 
 # ====================== 7. INTERFACE PUBLIQUE ======================
-config = charger_config(MARCHAND_ID, st.session_state.refresh_token)
-df_catalogue = charger_catalogue(MARCHAND_ID, st.session_state.refresh_token)
-avis_moyennes = charger_avis_moyennes(MARCHAND_ID, st.session_state.refresh_token)
-avis_par_article = indexer_avis_par_article(charger_tous_avis_approuves(MARCHAND_ID, st.session_state.refresh_token))
+# 🔒 FIX : si Supabase refuse une requête (abonnement expiré, droits RLS
+# temporairement mal configurés, panne réseau...), on affiche un message
+# clair au visiteur au lieu de le laisser voir un traceback Python brut.
+# Le détail technique complet part uniquement dans les logs serveur.
+try:
+    config = charger_config(MARCHAND_ID, st.session_state.refresh_token)
+    df_catalogue = charger_catalogue(MARCHAND_ID, st.session_state.refresh_token)
+    avis_moyennes = charger_avis_moyennes(MARCHAND_ID, st.session_state.refresh_token)
+    avis_par_article = indexer_avis_par_article(charger_tous_avis_approuves(MARCHAND_ID, st.session_state.refresh_token))
+except Exception as e:
+    logger.error(f"Échec du chargement de la boutique {MARCHAND_ID} : {e}")
+    st.error("😔 Cette boutique est momentanément indisponible. Merci de réessayer dans quelques instants.")
+    st.stop()
 
 # 🔔 Vérifications silencieuses (n'affichent rien, ne bloquent jamais la
 # page) -- envoient au plus un email par jour chacune, dès que quelqu'un
