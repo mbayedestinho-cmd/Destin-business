@@ -1084,8 +1084,10 @@ def generer_texte_ia(prompt, max_tokens=400):
 # photo d'un article + son nom + son prix + le nom de la boutique, que le
 # marchand peut ensuite télécharger et publier lui-même sur ses réseaux.
 # Nécessite Pillow (paquet "Pillow" dans requirements.txt).
-def generer_visuel_produit(url_image_produit, nom_produit, prix, nom_boutique, prix_promo=None):
-    """Retourne les octets PNG du visuel généré, ou (None, message_erreur)."""
+def generer_visuel_produit(url_image_produit, nom_produit, prix, nom_boutique, prix_promo=None, accroche=None):
+    """Retourne les octets PNG du visuel généré, ou (None, message_erreur).
+    `accroche` est un texte court facultatif (ex: généré par l'IA à partir
+    d'un brief du marchand) affiché en bandeau doré en haut de la photo."""
     try:
         from PIL import Image, ImageDraw, ImageFont
         from io import BytesIO
@@ -1125,6 +1127,13 @@ def generer_visuel_produit(url_image_produit, nom_produit, prix, nom_boutique, p
             except Exception:
                 continue
         return ImageFont.load_default()
+
+    # 🤖 Bandeau d'accroche (optionnel, ex: généré par l'IA) en haut de la
+    # photo -- pour un message ponctuel (occasion, promo...) sans devoir
+    # retoucher la photo elle-même.
+    if accroche and accroche.strip():
+        dessin.rectangle([0, 0, TAILLE, 74], fill=(201, 163, 92))
+        dessin.text((30, 20), accroche.strip().upper()[:55], font=police(34, gras=True), fill=(22, 21, 26))
 
     # Bandeau doré en bas avec nom boutique, nom produit et prix.
     dessin.rectangle([0, zone_photo_h, TAILLE, TAILLE], fill=(22, 21, 26))
@@ -2992,22 +3001,63 @@ else:
                 # ---- Bannière promo interne à la boutique ----
                 with sous_tab_banniere:
                     st.caption("Affichée en haut de ta boutique, juste sous le logo.")
+
+                    with st.expander("🤖 Générer avec l'IA"):
+                        brief_banniere = st.text_area(
+                            "Décris ta promotion (occasion, réduction, dates, code...)",
+                            key="brief_banniere_ia",
+                            placeholder="Ex : Soldes d'été, -20% sur toute la collection, valable tout juillet, code DESTIN-Y"
+                        )
+                        if st.button("🤖 Générer titre + texte", key="generer_banniere_ia"):
+                            if not brief_banniere.strip():
+                                st.warning("Décris d'abord ta promotion.")
+                            else:
+                                prompt_banniere = (
+                                    f"Tu rédiges une bannière promotionnelle pour la boutique de luxe "
+                                    f"« {config.get('nom_boutique', 'la boutique')} ». À partir de ces informations "
+                                    f"données par le marchand : « {brief_banniere.strip()} », propose un titre "
+                                    f"court et accrocheur (5 mots maximum) et un texte d'accompagnement (une "
+                                    f"phrase, 15 mots maximum). Si un code promo est mentionné dans les "
+                                    f"informations, reprends-le tel quel, sinon n'en invente pas. "
+                                    f"Réponds STRICTEMENT dans ce format, sans rien ajouter d'autre :\n"
+                                    f"TITRE: <titre>\nTEXTE: <texte>\nCODE: <code ou VIDE si aucun>"
+                                )
+                                with st.spinner("Génération en cours..."):
+                                    texte_banniere_ia, erreur_banniere_ia = generer_texte_ia(prompt_banniere, max_tokens=150)
+                                if erreur_banniere_ia:
+                                    st.error(f"❌ {erreur_banniere_ia}")
+                                else:
+                                    for ligne in texte_banniere_ia.splitlines():
+                                        ligne_maj = ligne.strip().upper()
+                                        if ligne_maj.startswith("TITRE:"):
+                                            st.session_state["banniere_titre_genere"] = ligne.split(":", 1)[1].strip()
+                                        elif ligne_maj.startswith("TEXTE:"):
+                                            st.session_state["banniere_texte_genere"] = ligne.split(":", 1)[1].strip()
+                                        elif ligne_maj.startswith("CODE:"):
+                                            valeur_code = ligne.split(":", 1)[1].strip()
+                                            if valeur_code and valeur_code.upper() != "VIDE":
+                                                st.session_state["banniere_code_genere"] = valeur_code
+                                    st.success("Généré ! Vérifie et ajuste ci-dessous avant d'enregistrer.")
+                                    st.rerun()
+
                     with st.form("form_banniere_promo"):
                         banniere_actif_input = st.checkbox(
                             "Afficher la bannière sur la boutique",
                             value=bool(config.get("banniere_actif"))
                         )
                         banniere_titre_input = st.text_input(
-                            "Titre", value=config.get("banniere_titre") or "",
+                            "Titre",
+                            value=st.session_state.get("banniere_titre_genere") or config.get("banniere_titre") or "",
                             placeholder="Ex : Soldes de fin d'année"
                         )
                         banniere_texte_input = st.text_area(
-                            "Texte", value=config.get("banniere_texte") or "",
+                            "Texte",
+                            value=st.session_state.get("banniere_texte_genere") or config.get("banniere_texte") or "",
                             placeholder="Ex : -20% sur toute la collection jusqu'au 31 décembre"
                         )
                         banniere_code_input = st.text_input(
                             "Code promo (facultatif)",
-                            value=config.get("banniere_code_promo") or "",
+                            value=st.session_state.get("banniere_code_genere") or config.get("banniere_code_promo") or "",
                             placeholder="Ex : NOEL20"
                         )
                         banniere_style_input = st.radio(
@@ -3033,6 +3083,8 @@ else:
                                     logger.exception("Échec enregistrement bannière promo")
                                     st.error("❌ L'enregistrement a échoué. Réessaie dans un instant.")
                                 else:
+                                    for cle_generee in ("banniere_titre_genere", "banniere_texte_genere", "banniere_code_genere"):
+                                        st.session_state.pop(cle_generee, None)
                                     forcer_rafraichissement()
                                     st.success("Bannière mise à jour.")
                                     st.rerun()
@@ -3049,6 +3101,37 @@ else:
                         options_produits = df_catalogue["nom"].dropna().tolist()
                         produit_choisi = st.selectbox("Article", options_produits, key="visuel_produit_choisi")
                         ligne_produit = df_catalogue[df_catalogue["nom"] == produit_choisi].iloc[0]
+
+                        with st.expander("🤖 Suggérer une accroche avec l'IA"):
+                            brief_accroche = st.text_input(
+                                "Occasion ou contexte (facultatif)",
+                                key="brief_accroche_ia",
+                                placeholder="Ex : Fête des mères, nouvelle collection, dernières pièces..."
+                            )
+                            if st.button("🤖 Suggérer une accroche", key="generer_accroche_ia"):
+                                prompt_accroche = (
+                                    f"Propose UNE accroche très courte (4 mots maximum, percutante, en français) "
+                                    f"pour un visuel réseaux sociaux de la boutique de luxe "
+                                    f"« {config.get('nom_boutique', 'la boutique')} », à propos de l'article "
+                                    f"« {ligne_produit.get('nom')} »"
+                                    + (f", contexte : {brief_accroche.strip()}" if brief_accroche.strip() else "")
+                                    + ". Réponds uniquement avec l'accroche, sans guillemets ni ponctuation finale."
+                                )
+                                with st.spinner("Génération en cours..."):
+                                    accroche_generee, erreur_accroche = generer_texte_ia(prompt_accroche, max_tokens=30)
+                                if erreur_accroche:
+                                    st.error(f"❌ {erreur_accroche}")
+                                else:
+                                    st.session_state["accroche_visuel_generee"] = accroche_generee.strip().strip('"')
+                                    st.rerun()
+
+                        accroche_visuel = st.text_input(
+                            "Accroche affichée sur le visuel (facultatif)",
+                            value=st.session_state.get("accroche_visuel_generee", ""),
+                            key="accroche_visuel_input",
+                            placeholder="Ex : NOUVELLE COLLECTION"
+                        )
+
                         if st.button("🖼️ Générer le visuel", key="generer_visuel_produit"):
                             with st.spinner("Génération du visuel..."):
                                 octets_image, erreur_visuel = generer_visuel_produit(
@@ -3057,6 +3140,7 @@ else:
                                     prix=ligne_produit.get("prix"),
                                     prix_promo=ligne_produit.get("prix_promo"),
                                     nom_boutique=config.get("nom_boutique"),
+                                    accroche=accroche_visuel,
                                 )
                             if erreur_visuel:
                                 st.error(f"❌ {erreur_visuel}")
