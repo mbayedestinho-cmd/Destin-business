@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import uuid
 import re
+import os
 import json
 import html as html_lib
 import unicodedata
@@ -437,6 +438,38 @@ def throttle(cle, delai_sec=10):
 # ====================== 3. IMGBB (upload d'images) ======================
 TAILLE_MAX_IMAGE_MO = 32  # limite du compte ImgBB gratuit
 
+# 🐛 CORRECTIF UPLOAD MOBILE : st.file_uploader envoie toujours le fichier
+# ORIGINAL (parfois 10-20 Mo, une photo de téléphone) en entier vers le
+# serveur avant qu'on puisse le compresser -- sur une connexion 3G/4G
+# instable, ce transfert lourd est celui qui échoue (coupure réseau brève =
+# reconnexion Streamlit = "flash sombre" et fichier perdu). La compression
+# ajoutée précédemment (voir compresser_image_avant_envoi) n'agissait qu'une
+# fois le fichier déjà arrivé sur le serveur -- trop tard.
+# Ce composant compresse l'image DANS LE TÉLÉPHONE (via <canvas>), avant
+# tout envoi réseau, pour que le transfert soit petit et rapide dès le
+# départ -- comme le font les applications professionnelles.
+_composant_compression_image = components.declare_component(
+    "compresseur_image",
+    path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "composant_compression_image")
+)
+
+
+def uploader_image_compressee(key):
+    """Affiche le widget d'upload avec compression téléphone, et renvoie
+    (contenu_bytes, nom_fichier) ou (None, None) si rien n'est sélectionné."""
+    resultat = _composant_compression_image(key=key, default=None)
+    if not resultat or not isinstance(resultat, dict):
+        return None, None
+    donnees_url = resultat.get("donnees") or ""
+    if "," not in donnees_url:
+        return None, None
+    try:
+        contenu = base64.b64decode(donnees_url.split(",", 1)[1])
+    except Exception:
+        return None, None
+    return contenu, (resultat.get("nom") or "image.jpg")
+
+
 # 🔒 FIX SÉCURITÉ : le paramètre `type=[...]` de st.file_uploader ne filtre
 # que l'extension affichée -- un fichier renommé (ex. script déguisé en
 # ".png") passait sans contrôle. On vérifie désormais la signature binaire
@@ -500,17 +533,14 @@ def compresser_image_avant_envoi(contenu: bytes) -> bytes:
         return contenu
 
 
-def televerser_image_imgbb(fichier):
-    """Envoie un fichier uploadé vers ImgBB.
+def televerser_octets_imgbb(contenu: bytes, deja_compressee: bool = False):
+    """Envoie des octets d'image vers ImgBB.
     Renvoie un tuple (url, erreur) : url vaut None en cas d'échec, et erreur
-    contient alors un message explicite (au lieu d'échouer silencieusement)."""
-    if fichier is None:
+    contient alors un message explicite (au lieu d'échouer silencieusement).
+    `deja_compressee=True` (venant du composant navigateur) évite de
+    recompresser inutilement une image déjà réduite côté client."""
+    if not contenu:
         return None, None
-
-    try:
-        contenu = fichier.getvalue()  # ne consomme pas le flux, contrairement à .read()
-    except Exception as e:
-        return None, f"Impossible de lire le fichier ({e})."
 
     if not est_image_valide(contenu):
         return None, "Le fichier ne correspond pas à un format d'image valide (jpg/png/webp)."
@@ -519,7 +549,8 @@ def televerser_image_imgbb(fichier):
     if taille_mo > TAILLE_MAX_IMAGE_MO:
         return None, f"Fichier trop volumineux ({taille_mo:.1f} Mo, max {TAILLE_MAX_IMAGE_MO} Mo)."
 
-    contenu = compresser_image_avant_envoi(contenu)
+    if not deja_compressee:
+        contenu = compresser_image_avant_envoi(contenu)
 
     try:
         image_b64 = base64.b64encode(contenu).decode()
@@ -543,6 +574,20 @@ def televerser_image_imgbb(fichier):
 
     message_erreur = (donnees.get("error") or {}).get("message", "erreur inconnue")
     return None, f"ImgBB a refusé l'image : {message_erreur} (code HTTP {reponse.status_code})."
+
+
+def televerser_image_imgbb(fichier):
+    """Envoie un fichier venant de st.file_uploader vers ImgBB (compatibilité
+    -- conservé là où le composant navigateur n'est pas encore branché).
+    Renvoie un tuple (url, erreur)."""
+    if fichier is None:
+        return None, None
+    try:
+        contenu = fichier.getvalue()  # ne consomme pas le flux, contrairement à .read()
+    except Exception as e:
+        return None, f"Impossible de lire le fichier ({e})."
+    return televerser_octets_imgbb(contenu, deja_compressee=False)
+
 
 
 
@@ -1767,14 +1812,18 @@ else:
                         nouvelles_tailles = st.text_input("Tailles (séparées par virgule)", value=row.get("tailles") or "")
                         nouvelles_couleurs = st.text_input("Couleurs (séparées par virgule)", value=row.get("couleurs") or "")
 
-                        nouvelle_image_fichier = st.file_uploader(
-                            "Remplacer l'image principale", type=["jpg", "jpeg", "png", "webp"],
+                        st.caption("Image principale")
+                        contenu_principale, _nom = uploader_image_compressee(
                             key=f"img_{cle_unique}_{st.session_state.refresh_token}"
                         )
-                        nouvelles_images_supp = st.file_uploader(
-                            "Ajouter des images supplémentaires", type=["jpg", "jpeg", "png", "webp"],
-                            accept_multiple_files=True, key=f"imgs_{cle_unique}_{st.session_state.refresh_token}"
-                        )
+                        st.caption("Images supplémentaires (jusqu'à 3, une à la fois)")
+                        contenus_supp = []
+                        for i in range(3):
+                            contenu_supp, _nom_supp = uploader_image_compressee(
+                                key=f"imgs_{cle_unique}_{i}_{st.session_state.refresh_token}"
+                            )
+                            if contenu_supp:
+                                contenus_supp.append(contenu_supp)
 
                         if st.form_submit_button("Enregistrer", disabled=id_manquant):
                             maj = {
@@ -1782,16 +1831,16 @@ else:
                                 "categorie": nouvelle_categorie, "tailles": nouvelles_tailles,
                                 "couleurs": nouvelles_couleurs
                             }
-                            if nouvelle_image_fichier is not None:
-                                url, erreur_upload = televerser_image_imgbb(nouvelle_image_fichier)
+                            if contenu_principale is not None:
+                                url, erreur_upload = televerser_octets_imgbb(contenu_principale, deja_compressee=True)
                                 if url:
                                     maj["image"] = url
                                 else:
                                     st.warning(f"Échec de l'envoi de l'image principale : {erreur_upload or 'raison inconnue'} — le reste a été enregistré.")
-                            if nouvelles_images_supp:
+                            if contenus_supp:
                                 urls_existantes = [u.strip() for u in str(row.get("images_supplementaires") or "").split(",") if u.strip()]
-                                for f in nouvelles_images_supp:
-                                    url, erreur_upload = televerser_image_imgbb(f)
+                                for c in contenus_supp:
+                                    url, erreur_upload = televerser_octets_imgbb(c, deja_compressee=True)
                                     if url:
                                         urls_existantes.append(url)
                                     elif erreur_upload:
@@ -1817,23 +1866,28 @@ else:
                 categorie = st.text_input("Catégorie")
                 tailles = st.text_input("Tailles (séparées par virgule)")
                 couleurs = st.text_input("Couleurs (séparées par virgule)")
-                image_fichier = st.file_uploader("Image principale", type=["jpg", "jpeg", "png", "webp"])
-                images_supp_fichiers = st.file_uploader(
-                    "Images supplémentaires (facultatif)", type=["jpg", "jpeg", "png", "webp"],
-                    accept_multiple_files=True
+                st.caption("Image principale")
+                contenu_principale, _nom = uploader_image_compressee(
+                    key=f"ajout_img_principale_{st.session_state.refresh_token}"
                 )
+                st.caption("Images supplémentaires (facultatif, jusqu'à 3, une à la fois)")
+                contenus_supp = []
+                for i in range(3):
+                    c, _n = uploader_image_compressee(key=f"ajout_img_supp_{i}_{st.session_state.refresh_token}")
+                    if c:
+                        contenus_supp.append(c)
                 if st.form_submit_button("Ajouter"):
                     if not nom.strip():
                         st.warning("Le nom de l'article est requis.")
                     else:
                         url_principale = ""
-                        if image_fichier:
-                            url_principale, erreur_upload = televerser_image_imgbb(image_fichier)
+                        if contenu_principale:
+                            url_principale, erreur_upload = televerser_octets_imgbb(contenu_principale, deja_compressee=True)
                             if erreur_upload:
                                 st.warning(f"Image principale non enregistrée : {erreur_upload}")
                         urls_supp = []
-                        for f in (images_supp_fichiers or []):
-                            url, erreur_upload = televerser_image_imgbb(f)
+                        for c in contenus_supp:
+                            url, erreur_upload = televerser_octets_imgbb(c, deja_compressee=True)
                             if url:
                                 urls_supp.append(url)
                             elif erreur_upload:
@@ -2163,16 +2217,15 @@ else:
                     st.image(config.get("logo"), width=150, caption="Logo actuel")
                 else:
                     st.caption("Aucun logo pour le moment.")
-                nouveau_logo_fichier = st.file_uploader(
-                    "Choisir un logo (remplace l'actuel)", type=["jpg", "jpeg", "png", "webp"],
+                nouveau_logo_contenu, _nom_logo = uploader_image_compressee(
                     key=f"upload_logo_{st.session_state.refresh_token}"
                 )
 
                 if st.form_submit_button("✅ Valider le nom, le slogan et le logo"):
                     logo_valeur = config.get("logo") or ""
                     echec_logo = False
-                    if nouveau_logo_fichier is not None:
-                        url_logo, erreur_upload = televerser_image_imgbb(nouveau_logo_fichier)
+                    if nouveau_logo_contenu is not None:
+                        url_logo, erreur_upload = televerser_octets_imgbb(nouveau_logo_contenu, deja_compressee=True)
                         if url_logo:
                             logo_valeur = url_logo
                         else:
