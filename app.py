@@ -2261,6 +2261,19 @@ else:
         )
 
         with tab_catalogue:
+            # 🐛 CORRECTIF : un échec d'envoi vers ImgBB (ex: quota atteint,
+            # erreur réseau) déclenchait un st.warning() juste avant un
+            # st.rerun() -- le message n'avait donc que quelques centièmes
+            # de seconde à l'écran avant de disparaître ("flash"), et
+            # l'article était quand même enregistré SANS photo, sans que le
+            # marchand ait pu lire pourquoi. Le message est maintenant
+            # conservé ici tant qu'il n'a pas été explicitement fermé.
+            if st.session_state.get("alerte_upload_catalogue"):
+                st.error(st.session_state["alerte_upload_catalogue"])
+                if st.button("OK, compris", key="fermer_alerte_upload_catalogue"):
+                    del st.session_state["alerte_upload_catalogue"]
+                    st.rerun()
+
             st.write("### Articles existants")
             for idx, (_, row) in enumerate(df_catalogue.iterrows()):
                 # 🔧 FIX : certaines lignes ont un "id" vide ou dupliqué
@@ -2319,12 +2332,13 @@ else:
                                 "categorie": nouvelle_categorie, "tailles": nouvelles_tailles,
                                 "couleurs": nouvelles_couleurs
                             }
+                            erreurs_images_edit = []
                             if contenu_principale is not None:
                                 url, erreur_upload = televerser_octets_imgbb(contenu_principale, deja_compressee=True)
                                 if url:
                                     maj["image"] = url
                                 else:
-                                    st.warning(f"Échec de l'envoi de l'image principale : {erreur_upload or 'raison inconnue'} — le reste a été enregistré.")
+                                    erreurs_images_edit.append(f"Photo principale : {erreur_upload or 'raison inconnue'}")
                             if contenus_supp:
                                 urls_existantes = [u.strip() for u in str(row.get("images_supplementaires") or "").split(",") if u.strip()]
                                 for c in contenus_supp:
@@ -2332,14 +2346,21 @@ else:
                                     if url:
                                         urls_existantes.append(url)
                                     elif erreur_upload:
-                                        st.warning(f"Image supplémentaire ignorée : {erreur_upload}")
+                                        erreurs_images_edit.append(f"Photo supplémentaire : {erreur_upload}")
                                 maj["images_supplementaires"] = ", ".join(urls_existantes)
                             sb_admin.table("catalogue").update(maj).eq("id", row["id"]).execute()
                             ancien_stock = int(row.get("stock") or 0)
                             if ancien_stock <= 0 and nouveau_stock > 0:
                                 notifier_retour_stock(nouveau_nom)
                             forcer_rafraichissement()
-                            st.success("Article mis à jour")
+                            if erreurs_images_edit:
+                                st.session_state["alerte_upload_catalogue"] = (
+                                    "⚠️ « " + nouveau_nom + " » a été mis à jour, mais l'envoi de photo a échoué : "
+                                    + " ; ".join(erreurs_images_edit) + ". Le reste a bien été enregistré."
+                                )
+                            else:
+                                st.session_state.pop("alerte_upload_catalogue", None)
+                                st.success("Article mis à jour")
                             st.rerun()
                     if not id_manquant and st.button("🗑️ Supprimer", key=f"del_{cle_unique}"):
                         sb_admin.table("catalogue").delete().eq("id", row["id"]).execute()
@@ -2369,17 +2390,18 @@ else:
                         st.warning("Le nom de l'article est requis.")
                     else:
                         url_principale = ""
+                        erreurs_images = []
                         if contenu_principale:
                             url_principale, erreur_upload = televerser_octets_imgbb(contenu_principale, deja_compressee=True)
                             if erreur_upload:
-                                st.warning(f"Image principale non enregistrée : {erreur_upload}")
+                                erreurs_images.append(f"Photo principale : {erreur_upload}")
                         urls_supp = []
                         for c in contenus_supp:
                             url, erreur_upload = televerser_octets_imgbb(c, deja_compressee=True)
                             if url:
                                 urls_supp.append(url)
                             elif erreur_upload:
-                                st.warning(f"Image supplémentaire ignorée : {erreur_upload}")
+                                erreurs_images.append(f"Photo supplémentaire : {erreur_upload}")
                         sb_admin.table("catalogue").insert({
                             "id": str(uuid.uuid4()),
                             "nom": nom, "prix": int(prix), "stock": stock,
@@ -2389,7 +2411,15 @@ else:
                             "marchand_id": MARCHAND_ID
                         }).execute()
                         forcer_rafraichissement()
-                        st.success("Article ajouté")
+                        if erreurs_images:
+                            st.session_state["alerte_upload_catalogue"] = (
+                                "⚠️ « " + nom + " » a été ajouté, mais SANS photo -- l'envoi a échoué : "
+                                + " ; ".join(erreurs_images)
+                                + ". Ouvre l'article ci-dessus pour réessayer d'ajouter la photo."
+                            )
+                        else:
+                            st.session_state.pop("alerte_upload_catalogue", None)
+                            st.success("Article ajouté")
                         st.rerun()
 
         with tab_promos:
