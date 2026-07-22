@@ -458,6 +458,48 @@ def est_image_valide(contenu: bytes) -> bool:
     return False
 
 
+def compresser_image_avant_envoi(contenu: bytes) -> bytes:
+    """Redimensionne/compresse l'image avant l'envoi vers ImgBB.
+
+    🐛 CORRECTIF : les photos de téléphone (souvent 5 à 20 Mo) partaient vers
+    ImgBB telles quelles, encodées en base64 (+33% de poids), sur des
+    connexions mobiles parfois instables -- d'où des envois qui réussissaient
+    ou échouaient au hasard selon la qualité du réseau au moment T, avec
+    plusieurs essais nécessaires. En ramenant l'image à une taille raisonnable
+    ici, le transfert est nettement plus rapide et fiable, comme le font les
+    applications professionnelles avant tout envoi.
+    Retourne le contenu original si la compression échoue ou n'aide pas,
+    pour ne jamais bloquer un envoi qui aurait fonctionné avant."""
+    try:
+        from PIL import Image
+        from io import BytesIO
+    except ImportError:
+        return contenu
+
+    try:
+        image = Image.open(BytesIO(contenu))
+        a_transparence = image.mode in ("RGBA", "LA") or (
+            image.mode == "P" and "transparency" in image.info
+        )
+
+        LARGEUR_MAX = 1600
+        if image.width > LARGEUR_MAX:
+            nouvelle_hauteur = int(image.height * (LARGEUR_MAX / image.width))
+            image = image.resize((LARGEUR_MAX, nouvelle_hauteur), Image.LANCZOS)
+
+        tampon = BytesIO()
+        if a_transparence:
+            image.save(tampon, format="PNG", optimize=True)
+        else:
+            image.convert("RGB").save(tampon, format="JPEG", quality=82, optimize=True)
+
+        resultat = tampon.getvalue()
+        return resultat if len(resultat) < len(contenu) else contenu
+    except Exception:
+        logger.exception("Échec compression image avant envoi -- envoi de l'original")
+        return contenu
+
+
 def televerser_image_imgbb(fichier):
     """Envoie un fichier uploadé vers ImgBB.
     Renvoie un tuple (url, erreur) : url vaut None en cas d'échec, et erreur
@@ -476,6 +518,8 @@ def televerser_image_imgbb(fichier):
     taille_mo = len(contenu) / (1024 * 1024)
     if taille_mo > TAILLE_MAX_IMAGE_MO:
         return None, f"Fichier trop volumineux ({taille_mo:.1f} Mo, max {TAILLE_MAX_IMAGE_MO} Mo)."
+
+    contenu = compresser_image_avant_envoi(contenu)
 
     try:
         image_b64 = base64.b64encode(contenu).decode()
@@ -499,6 +543,7 @@ def televerser_image_imgbb(fichier):
 
     message_erreur = (donnees.get("error") or {}).get("message", "erreur inconnue")
     return None, f"ImgBB a refusé l'image : {message_erreur} (code HTTP {reponse.status_code})."
+
 
 
 # ====================== 3bis. GALERIE PHOTOS AVEC GLISSEMENT (SWIPE) ======================
