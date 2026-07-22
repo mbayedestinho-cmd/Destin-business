@@ -2752,9 +2752,41 @@ else:
                 with st.expander(f"{panier.get('client_nom') or 'Client'} — {panier.get('telephone')} — {total} FCFA"):
                     st.json(panier.get("articles"))
                     tel_relance = re.sub(r"\D", "", str(panier.get("telephone") or ""))
+                    message_relance_defaut = f"Bonjour, vous avez laissé des articles dans votre panier sur {config.get('nom_boutique', 'notre boutique')} — puis-je vous aider à finaliser votre commande ?"
+
+                    # 🤖 Script de relance IA (module Aura Luxe) -- reprend les
+                    # articles réellement laissés dans le panier pour un message
+                    # personnalisé plutôt que le message générique par défaut.
+                    if boutique_premium(config):
+                        cle_message_ia = f"relance_ia_{cle_unique}"
+                        if st.button("🤖 Générer un message de relance personnalisé", key=f"btn_{cle_message_ia}"):
+                            noms_articles = ", ".join(
+                                a.get("nom", "") for a in (panier.get("articles") or []) if a.get("nom")
+                            ) or "les articles de son panier"
+                            prompt_relance = (
+                                f"Tu es le service client de la boutique de luxe « {config.get('nom_boutique', 'notre boutique')} ». "
+                                f"Rédige un message WhatsApp court (2 à 3 phrases, chaleureux, pas insistant) pour relancer "
+                                f"{panier.get('client_nom') or 'un client'} qui a laissé dans son panier : {noms_articles}, "
+                                f"pour un total de {int(total)} FCFA. Donne-lui envie de finaliser sans le mettre sous pression. "
+                                f"Réponds uniquement avec le texte du message, en français, sans introduction."
+                            )
+                            with st.spinner("Génération en cours..."):
+                                texte_relance, erreur_relance = generer_texte_ia(prompt_relance, max_tokens=180)
+                            if erreur_relance:
+                                st.error(f"❌ {erreur_relance}")
+                            else:
+                                st.session_state[cle_message_ia] = texte_relance
+
+                        if st.session_state.get(cle_message_ia):
+                            message_relance_defaut = st.text_area(
+                                "Message de relance (modifiable)",
+                                value=st.session_state[cle_message_ia],
+                                key=f"texte_{cle_message_ia}",
+                                height=100,
+                            )
+
                     if tel_relance:
-                        message = f"Bonjour, vous avez laissé des articles dans votre panier sur {config.get('nom_boutique', 'notre boutique')} — puis-je vous aider à finaliser votre commande ?"
-                        lien_whatsapp = f"https://wa.me/{tel_relance}?text={requests.utils.quote(message)}"
+                        lien_whatsapp = f"https://wa.me/{tel_relance}?text={requests.utils.quote(message_relance_defaut)}"
                         st.link_button("💬 Relancer sur WhatsApp", lien_whatsapp)
                     if st.button("🗑️ Marquer comme traité", key=f"panier_traite_{cle_unique}"):
                         sb_admin.table("paniersabandonnés").update({"statut": "traite"}).eq("telephone", panier["telephone"]).eq("marchand_id", MARCHAND_ID).execute()
@@ -2990,6 +3022,158 @@ else:
                                 value=st.session_state["ia_post_genere"],
                                 key="ia_post_editable",
                                 height=160,
+                            )
+
+                        st.divider()
+                        st.markdown("#### 🔁 Tunnel de vente WhatsApp")
+                        st.caption("Trois messages prêts à envoyer à quelques jours d'intervalle (J0, relance, clôture).")
+                        sujet_tunnel = st.text_input(
+                            "Produit ou promo à mettre en avant", key="ia_sujet_tunnel",
+                            placeholder="Ex : Nouvelle collection Sac Aurore, ou -15% ce week-end"
+                        )
+                        if st.button("🤖 Générer le tunnel", key="ia_generer_tunnel"):
+                            if not sujet_tunnel.strip():
+                                st.warning("Précise d'abord un produit ou une promo.")
+                            else:
+                                prompt_tunnel = (
+                                    f"Tu gères le WhatsApp Business de la boutique de luxe « {config.get('nom_boutique', 'la boutique')} ». "
+                                    f"Rédige 3 messages courts et distincts pour promouvoir : « {sujet_tunnel.strip()} ». "
+                                    f"Message 1 (annonce, ton enthousiaste) ; Message 2 (relance 2 jours après pour ceux qui "
+                                    f"n'ont pas répondu, ton léger, crée un peu d'urgence sans être insistant) ; "
+                                    f"Message 3 (clôture, dernière chance, ton chaleureux). "
+                                    f"Réponds STRICTEMENT dans ce format, sans rien ajouter d'autre :\n"
+                                    f"MESSAGE 1:\n<texte>\nMESSAGE 2:\n<texte>\nMESSAGE 3:\n<texte>"
+                                )
+                                with st.spinner("Génération en cours..."):
+                                    texte_tunnel, erreur_tunnel = generer_texte_ia(prompt_tunnel, max_tokens=450)
+                                if erreur_tunnel:
+                                    st.error(f"❌ {erreur_tunnel}")
+                                else:
+                                    st.session_state["ia_tunnel_genere"] = texte_tunnel
+
+                        if st.session_state.get("ia_tunnel_genere"):
+                            st.text_area(
+                                "Tunnel généré (copie-colle chaque message au bon moment)",
+                                value=st.session_state["ia_tunnel_genere"],
+                                key="ia_tunnel_editable",
+                                height=260,
+                            )
+
+                        st.divider()
+                        st.markdown("#### 🎁 Packs produits cohérents")
+                        st.caption(
+                            "L'IA propose un pack à partir de ton catalogue -- à valider avant de le transformer "
+                            "en collection, elle ne connaît pas la vraie compatibilité matière/style de tes articles."
+                        )
+                        articles_pack = st.multiselect(
+                            "Articles à combiner (laisse vide pour que l'IA choisisse dans tout le catalogue)",
+                            df_catalogue["nom"].dropna().tolist(), key="ia_articles_pack"
+                        )
+                        if st.button("🤖 Proposer un pack", key="ia_generer_pack"):
+                            if articles_pack:
+                                liste_catalogue_pack = ", ".join(articles_pack)
+                            else:
+                                liste_catalogue_pack = ", ".join(df_catalogue["nom"].dropna().tolist()[:30])
+                            prompt_pack = (
+                                f"Voici le catalogue (ou une sélection) de la boutique de luxe « {config.get('nom_boutique', 'la boutique')} » : "
+                                f"{liste_catalogue_pack}. Compose UN pack cohérent de 2 à 4 articles pris dans cette liste "
+                                f"(ne pas inventer d'articles). Réponds STRICTEMENT dans ce format :\n"
+                                f"NOM DU PACK: <nom accrocheur>\nARTICLES: <liste des articles séparés par des virgules, "
+                                f"exactement comme dans la liste fournie>\nPOURQUOI: <1-2 phrases expliquant l'association>"
+                            )
+                            with st.spinner("Génération en cours..."):
+                                texte_pack, erreur_pack = generer_texte_ia(prompt_pack, max_tokens=250)
+                            if erreur_pack:
+                                st.error(f"❌ {erreur_pack}")
+                            else:
+                                st.session_state["ia_pack_genere"] = texte_pack
+
+                        if st.session_state.get("ia_pack_genere"):
+                            st.text_area(
+                                "Suggestion de pack (vérifie la cohérence avant de créer la collection)",
+                                value=st.session_state["ia_pack_genere"],
+                                key="ia_pack_editable",
+                                height=140,
+                            )
+                            st.caption(
+                                "Pour transformer cette suggestion en vraie collection avec expiration, "
+                                "utilise l'onglet « ⚡ Flash Sales & Collections » juste à côté."
+                            )
+
+                        st.divider()
+                        st.markdown("#### 📅 Idées de contenu sur 30 jours")
+                        if st.button("🤖 Générer un calendrier de contenu", key="ia_generer_calendrier"):
+                            prompt_calendrier = (
+                                f"Tu gères les réseaux sociaux de la boutique de luxe « {config.get('nom_boutique', 'la boutique')} », "
+                                f"catégories principales : {', '.join(df_catalogue['categorie'].dropna().unique().tolist()[:8]) or 'articles de luxe'}. "
+                                f"Propose 30 idées de contenu, une par jour (posts, stories, mises en avant produit, "
+                                f"témoignages clients, coulisses...), variées et courtes (une ligne chacune). "
+                                f"Réponds STRICTEMENT au format :\nJour 1: <idée>\nJour 2: <idée>\n... jusqu'à Jour 30."
+                            )
+                            with st.spinner("Génération en cours (peut prendre un peu plus de temps)..."):
+                                texte_calendrier, erreur_calendrier = generer_texte_ia(prompt_calendrier, max_tokens=1100)
+                            if erreur_calendrier:
+                                st.error(f"❌ {erreur_calendrier}")
+                            else:
+                                st.session_state["ia_calendrier_genere"] = texte_calendrier
+
+                        if st.session_state.get("ia_calendrier_genere"):
+                            st.text_area(
+                                "Calendrier généré",
+                                value=st.session_state["ia_calendrier_genere"],
+                                key="ia_calendrier_editable",
+                                height=400,
+                            )
+
+                        st.divider()
+                        st.markdown("#### 🎯 Offre personnalisée à partir de l'historique client")
+                        st.caption(
+                            "⚠️ Envoie l'historique d'achat de ce client vers le fournisseur IA choisi "
+                            "(Groq/Gemini/DeepSeek). N'utilise cette fonction que si tu es à l'aise avec ce partage."
+                        )
+                        tel_historique = st.text_input("Numéro de téléphone du client", key="ia_tel_historique")
+                        if st.button("🤖 Analyser et proposer une offre", key="ia_generer_offre_client"):
+                            tel_normalise_hist = re.sub(r"\D", "", tel_historique or "")
+                            if not tel_normalise_hist:
+                                st.warning("Merci de renseigner un numéro de téléphone.")
+                            else:
+                                reponse_historique = (
+                                    sb_admin.table("commandes")
+                                    .select("articles, price, date, statut")
+                                    .eq("marchand_id", MARCHAND_ID)
+                                    .eq("tel", tel_normalise_hist)
+                                    .order("date", desc=True)
+                                    .limit(20)
+                                    .execute()
+                                )
+                                commandes_client = reponse_historique.data or []
+                                if not commandes_client:
+                                    st.info("Aucune commande trouvée pour ce numéro.")
+                                else:
+                                    resume_commandes = "; ".join(
+                                        f"{c.get('date', '')[:10]} : {c.get('articles')} ({int(c.get('price') or 0)} FCFA, {c.get('statut')})"
+                                        for c in commandes_client
+                                    )
+                                    prompt_offre = (
+                                        f"Voici l'historique de commandes d'un client de la boutique de luxe "
+                                        f"« {config.get('nom_boutique', 'la boutique')} » : {resume_commandes}. "
+                                        f"Propose une courte offre personnalisée (2-3 phrases, message prêt à envoyer "
+                                        f"par WhatsApp) qui s'appuie sur ce qu'il a déjà acheté, sans inventer de "
+                                        f"remise chiffrée précise sauf si tu restes cohérent et raisonnable (max 15%)."
+                                    )
+                                    with st.spinner("Analyse en cours..."):
+                                        texte_offre, erreur_offre = generer_texte_ia(prompt_offre, max_tokens=220)
+                                    if erreur_offre:
+                                        st.error(f"❌ {erreur_offre}")
+                                    else:
+                                        st.session_state["ia_offre_genere"] = texte_offre
+
+                        if st.session_state.get("ia_offre_genere"):
+                            st.text_area(
+                                "Offre personnalisée générée",
+                                value=st.session_state["ia_offre_genere"],
+                                key="ia_offre_editable",
+                                height=120,
                             )
 
                 # ---- Flash Sales (compte à rebours) + Collections temporaires ----
