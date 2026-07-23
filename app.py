@@ -2414,7 +2414,7 @@ else:
                                     elif erreur_upload:
                                         erreurs_images_edit.append(f"Photo supplémentaire : {erreur_upload}")
                                 maj["images_supplementaires"] = ", ".join(urls_existantes)
-                            sb_admin.table("catalogue").update(maj).eq("id", row["id"]).execute()
+                            sb_admin.table("catalogue").update(maj).eq("id", row["id"]).eq("marchand_id", MARCHAND_ID).execute()
                             ancien_stock = int(row.get("stock") or 0)
                             if ancien_stock <= 0 and nouveau_stock > 0:
                                 notifier_retour_stock(nouveau_nom)
@@ -2429,7 +2429,7 @@ else:
                                 st.success("Article mis à jour")
                             st.rerun()
                     if not id_manquant and st.button("🗑️ Supprimer", key=f"del_{cle_unique}"):
-                        sb_admin.table("catalogue").delete().eq("id", row["id"]).execute()
+                        sb_admin.table("catalogue").delete().eq("id", row["id"]).eq("marchand_id", MARCHAND_ID).execute()
                         forcer_rafraichissement()
                         st.rerun()
 
@@ -2517,7 +2517,7 @@ else:
                             unsafe_allow_html=True
                         )
                         if st.button("Retirer la promotion", key=f"retrait_promo_{ligne['id']}"):
-                            sb_admin.table("catalogue").update({"prix_promo": None}).eq("id", ligne["id"]).execute()
+                            sb_admin.table("catalogue").update({"prix_promo": None}).eq("id", ligne["id"]).eq("marchand_id", MARCHAND_ID).execute()
                             forcer_rafraichissement()
                             st.rerun()
 
@@ -2543,7 +2543,7 @@ else:
                                     nouveau_prix_promo = max(0, prix_original - valeur_reduction)
                                 sb_admin.table("catalogue").update(
                                     {"prix_promo": nouveau_prix_promo}
-                                ).eq("id", ligne["id"]).execute()
+                                ).eq("id", ligne["id"]).eq("marchand_id", MARCHAND_ID).execute()
                             forcer_rafraichissement()
                             st.success(f"Promotion appliquée à {len(articles_selectionnes)} article(s)")
                             st.rerun()
@@ -2641,7 +2641,7 @@ else:
                         "Statut", statuts_possibles, index=index_defaut, key=f"statut_{cle_unique}"
                     )
                     if st.button("Mettre à jour", key=f"maj_{cle_unique}"):
-                        sb_admin.table("commandes").update({"statut": nouveau_statut}).eq("id", cmd["id"]).execute()
+                        sb_admin.table("commandes").update({"statut": nouveau_statut}).eq("id", cmd["id"]).eq("marchand_id", MARCHAND_ID).execute()
                         # 🔔 Notifie le client du nouveau statut -- pas d'envoi
                         # automatique possible sans API WhatsApp Business, donc
                         # on prépare le message et on laisse un clic l'envoyer,
@@ -2683,11 +2683,11 @@ else:
                     st.write(avis_item.get("commentaire") or "(pas de commentaire)")
                     col1, col2 = st.columns(2)
                     if col1.button("✅ Approuver", key=f"appr_{cle_unique}"):
-                        sb_admin.table("avis").update({"statut": "approuve"}).eq("id", avis_item["id"]).execute()
+                        sb_admin.table("avis").update({"statut": "approuve"}).eq("id", avis_item["id"]).eq("marchand_id", MARCHAND_ID).execute()
                         forcer_rafraichissement()
                         st.rerun()
                     if col2.button("🗑️ Supprimer", key=f"suppr_avis_{cle_unique}"):
-                        sb_admin.table("avis").delete().eq("id", avis_item["id"]).execute()
+                        sb_admin.table("avis").delete().eq("id", avis_item["id"]).eq("marchand_id", MARCHAND_ID).execute()
                         forcer_rafraichissement()
                         st.rerun()
 
@@ -2713,7 +2713,7 @@ else:
                 with st.expander(f"{avis_item['client_nom']} — {avis_item['article_nom']} — {'⭐' * int(avis_item['note'])}"):
                     st.write(avis_item.get("commentaire") or "(pas de commentaire)")
                     if st.button("🗑️ Supprimer", key=f"suppr_avis_{cle_unique}"):
-                        sb_admin.table("avis").delete().eq("id", avis_item["id"]).execute()
+                        sb_admin.table("avis").delete().eq("id", avis_item["id"]).eq("marchand_id", MARCHAND_ID).execute()
                         forcer_rafraichissement()
                         st.rerun()
 
@@ -3593,7 +3593,7 @@ else:
                             col_nom_coll, col_action_coll = st.columns([3, 1])
                             col_nom_coll.write(f"**{coll['nom']}** — {statut_coll}")
                             if col_action_coll.button("🗑️ Supprimer", key=f"suppr_coll_{coll['id']}"):
-                                sb_admin.table("collections").delete().eq("id", coll["id"]).execute()
+                                sb_admin.table("collections").delete().eq("id", coll["id"]).eq("marchand_id", MARCHAND_ID).execute()
                                 forcer_rafraichissement()
                                 st.rerun()
 
@@ -3688,7 +3688,7 @@ else:
                             col_membre, col_suppr_membre = st.columns([3, 1])
                             col_membre.write(f"👑 {membre.get('nom') or 'Client'} — {membre['telephone']}")
                             if col_suppr_membre.button("🗑️", key=f"suppr_vip_{membre['id']}"):
-                                sb_admin.table("clients_vip").delete().eq("id", membre["id"]).execute()
+                                sb_admin.table("clients_vip").delete().eq("id", membre["id"]).eq("marchand_id", MARCHAND_ID).execute()
                                 st.rerun()
 
                 # ---- Mise en vedette dans la vitrine commune ----
