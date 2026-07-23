@@ -44,14 +44,23 @@ st.set_page_config(page_title="Destiny Luxury Collection", page_icon="👗", lay
 # ====================== 0. STYLE (thème "luxe" sobre : fond sombre, accents dorés) ======================
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&family=Cormorant+Garamond:wght@600;700&family=Montserrat:wght@500;600;700&family=Poppins:wght@500;600;700&family=Oswald:wght@500;600;700&family=Raleway:wght@500;600;700&family=Bebas+Neue&display=swap');
 
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    h1, h2, h3 { font-family: 'Playfair Display', serif !important; letter-spacing: 0.3px; }
+    h1, h2, h3 { font-family: var(--aura-font-titre, 'Playfair Display', serif) !important; letter-spacing: 0.3px; }
 
-    /* 🎨 Variable de thème -- surchargée par boutique premium via
-       injecter_theme_premium(). Par défaut : doré classique Destiny. */
-    :root { --aura-accent: #c9a35c; --aura-accent-clair: #dab873; }
+    /* 🎨 Variables de thème -- surchargées par boutique premium via
+       injecter_theme_premium() (couleur d'accent ET police des titres).
+       Par défaut : doré classique Destiny + Playfair Display. C'est aussi
+       ce sur quoi l'appli retombe automatiquement dès que le mode premium
+       est désactivé (voir injecter_theme_premium : elle ne s'exécute que
+       pour une boutique premium, donc ces valeurs par défaut redeviennent
+       actives immédiatement pour toutes les autres). */
+    :root {
+        --aura-accent: #c9a35c;
+        --aura-accent-clair: #dab873;
+        --aura-font-titre: 'Playfair Display', serif;
+    }
 
     .stApp { background: linear-gradient(180deg, #0d0d0f 0%, #16151a 100%); }
 
@@ -92,7 +101,7 @@ st.markdown("""
     /* Prix et titres produits */
     div[data-testid="stMarkdownContainer"] strong { color: #eae4d8; }
     .destiny-nom-produit {
-        font-family: 'Playfair Display', serif;
+        font-family: var(--aura-font-titre, 'Playfair Display', serif);
         font-size: 1.12rem;
         font-weight: 700;
         color: #eae4d8;
@@ -115,10 +124,14 @@ st.markdown("""
     }
     .destiny-prix-normal { color: #eae4d8; font-weight: 600; font-size: 1.05rem; }
 
-    /* ✨ Badge Aura Luxe -- doré, animé, réservé aux boutiques premium */
+    /* ✨ Badge Aura Luxe -- animé, réservé aux boutiques premium. Utilise
+       les variables de thème (couleur choisie par le marchand) : reste
+       doré par défaut, se recolore automatiquement sinon. Style "plein
+       scintillant" par défaut ; variantes ci-dessous sélectionnables
+       depuis l'onglet Thème & badge. */
     .aura-badge {
         display: inline-flex; align-items: center; gap: 6px;
-        background: linear-gradient(120deg, #f0d9a6, #c9a35c, #f0d9a6, #c9a35c);
+        background: linear-gradient(120deg, var(--aura-accent-clair), var(--aura-accent), var(--aura-accent-clair), var(--aura-accent));
         background-size: 300% 100%;
         animation: aura-shimmer 3.5s linear infinite;
         color: #16151a; font-weight: 700; font-size: 0.82rem;
@@ -128,6 +141,31 @@ st.markdown("""
     @keyframes aura-shimmer {
         0% { background-position: 0% 50%; }
         100% { background-position: 300% 50%; }
+    }
+
+    /* Variante "Contour lumineux" : fond transparent, liseré pulsant. */
+    .aura-badge.style-contour {
+        background: transparent; animation: none; box-shadow: none;
+        color: var(--aura-accent); border: 1.5px solid var(--aura-accent);
+        animation: aura-badge-contour-pulse 2.2s ease-in-out infinite;
+    }
+    @keyframes aura-badge-contour-pulse {
+        0%, 100% { box-shadow: 0 0 6px var(--aura-accent); }
+        50% { box-shadow: 0 0 16px var(--aura-accent); }
+    }
+
+    /* Variante "Mat professionnel" : couleur pleine sobre, sans animation
+       -- adaptée aux thèmes "bleu professionnel", "vert", etc. */
+    .aura-badge.style-mat {
+        background: var(--aura-accent); animation: none;
+        color: #ffffff; box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+    }
+
+    /* Variante "Verre givré" : discrète, translucide. */
+    .aura-badge.style-glace {
+        background: rgba(255,255,255,0.08); animation: none;
+        color: var(--aura-accent); border: 1px solid var(--aura-accent);
+        box-shadow: 0 2px 14px rgba(0,0,0,0.25); backdrop-filter: blur(6px);
     }
 
     /* 🔮 Bannière promo -- variante néon (module Aura Luxe) */
@@ -212,6 +250,53 @@ st.markdown("""
         45%  { left: 130%; }
         100% { left: 130%; }
     }
+
+    /* ✨ Variantes d'animation du logo (module Aura Luxe, premium) --
+       ajoutées sur .destiny-hero en plus de la classe de base. Sans
+       classe supplémentaire, le comportement par défaut ci-dessus
+       (halo doré pulsant + balayage brillant) s'applique -- c'est aussi
+       ce sur quoi l'appli retombe automatiquement si le mode premium
+       est désactivé. */
+
+    /* Halo néon autour du logo, sans pulsation de fond ni balayage. */
+    .destiny-hero.anim-neon::before { animation: none; }
+    .destiny-hero.anim-neon img {
+        animation: aura-logo-neon 2.2s ease-in-out infinite;
+        box-shadow: none; border: 2px solid var(--aura-accent);
+    }
+    .destiny-hero.anim-neon .destiny-hero-shine { display: none; }
+    @keyframes aura-logo-neon {
+        0%, 100% { box-shadow: 0 0 10px var(--aura-accent), 0 0 20px rgba(0,0,0,0); }
+        50% { box-shadow: 0 0 26px var(--aura-accent), 0 0 50px var(--aura-accent); }
+    }
+
+    /* Flottement doux -- rendu plus "moderne / corporate" que le glow doré. */
+    .destiny-hero.anim-douce::before { animation: none; }
+    .destiny-hero.anim-douce img {
+        animation: aura-logo-float 3.6s ease-in-out infinite;
+        box-shadow: 0 14px 34px rgba(0,0,0,0.4), 0 0 20px var(--aura-accent);
+    }
+    .destiny-hero.anim-douce .destiny-hero-shine { display: none; }
+    @keyframes aura-logo-float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-8px); }
+    }
+
+    /* Rotation discrète -- garde le halo tournant en fond, retire la
+       pulsation de lumière et le balayage brillant sur le logo. */
+    .destiny-hero.anim-rotation img {
+        animation: none;
+        box-shadow: 0 10px 34px rgba(0,0,0,0.45), 0 0 22px var(--aura-accent);
+    }
+    .destiny-hero.anim-rotation .destiny-hero-shine { display: none; }
+
+    /* Aucune animation -- rendu sobre, entièrement statique. */
+    .destiny-hero.anim-aucune::before { animation: none; opacity: 0.35; }
+    .destiny-hero.anim-aucune img {
+        animation: none; box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    }
+    .destiny-hero.anim-aucune .destiny-hero-shine { display: none; }
+
     .destiny-hero h1 {
         font-size: 2.6rem;
         color: #f4ecdc;
@@ -326,7 +411,7 @@ st.markdown("""
         font-size: 1rem;
     }
     .dlc-panel-titre {
-        font-family: 'Playfair Display', serif; font-size: 1.05rem; font-weight: 700;
+        font-family: var(--aura-font-titre, 'Playfair Display', serif); font-size: 1.05rem; font-weight: 700;
         color: #eae4d8; letter-spacing: 0.2px;
     }
 
@@ -1089,14 +1174,28 @@ def entete_panneau_sidebar(icone, titre, eyebrow):
     )
 
 
-def afficher_hero(logo_url, titre, sous_titre=""):
-    """Affiche le bandeau logo + effet lumineux doré en arrière-plan, avec un
+ANIMATIONS_LOGO = {
+    "glow": "Doré scintillant (défaut)",
+    "neon": "Halo néon",
+    "douce": "Flottement doux",
+    "rotation": "Rotation discrète",
+    "aucune": "Aucune (sobre)",
+}
+
+
+def afficher_hero(logo_url, titre, sous_titre="", animation_logo="glow"):
+    """Affiche le bandeau logo + effet lumineux en arrière-plan, avec un
     titre (ex: nom de la boutique, ou message de bienvenue) et un sous-titre
-    facultatif. Réutilisé pour la boutique ET pour l'écran d'accueil admin."""
+    facultatif. Réutilisé pour la boutique ET pour l'écran d'accueil admin.
+    `animation_logo` (module Aura Luxe, premium) choisit la variante
+    d'animation du logo -- "glow" (valeur par défaut) reproduit exactement
+    le rendu doré historique, donc une boutique standard ou repassée en
+    standard retombe automatiquement dessus."""
+    classe_anim = f" anim-{animation_logo}" if animation_logo and animation_logo != "glow" else ""
     sous_titre_html = f'<div class="destiny-tagline">{sous_titre}</div>' if sous_titre else ""
     if logo_url:
         st.markdown(
-            f'<div class="destiny-hero">'
+            f'<div class="destiny-hero{classe_anim}">'
             f'<div class="destiny-hero-logo-wrap">'
             f'<img src="{html_lib.escape(logo_url, quote=True)}">'
             f'<div class="destiny-hero-shine"></div>'
@@ -1108,7 +1207,7 @@ def afficher_hero(logo_url, titre, sous_titre=""):
         )
     else:
         st.markdown(
-            f'<div class="destiny-hero"><h1>{titre}</h1>{sous_titre_html}</div>',
+            f'<div class="destiny-hero{classe_anim}"><h1>{titre}</h1>{sous_titre_html}</div>',
             unsafe_allow_html=True
         )
 
@@ -1216,15 +1315,23 @@ def generer_texte_ia(prompt, max_tokens=400):
 # photo d'un article + son nom + son prix + le nom de la boutique, que le
 # marchand peut ensuite télécharger et publier lui-même sur ses réseaux.
 # Nécessite Pillow (paquet "Pillow" dans requirements.txt).
-def generer_visuel_produit(url_image_produit, nom_produit, prix, nom_boutique, prix_promo=None, accroche=None):
+def generer_visuel_produit(url_image_produit, nom_produit, prix, nom_boutique, prix_promo=None, accroche=None, couleur_accent=None):
     """Retourne les octets PNG du visuel généré, ou (None, message_erreur).
     `accroche` est un texte court facultatif (ex: généré par l'IA à partir
-    d'un brief du marchand) affiché en bandeau doré en haut de la photo."""
+    d'un brief du marchand) affiché en bandeau en haut de la photo.
+    `couleur_accent` (ex: "#2f6fed") reprend la couleur de thème choisie
+    par le marchand premium -- doré Destiny par défaut si absente/invalide,
+    pour que le visuel généré reste cohérent avec l'identité de la boutique."""
     try:
         from PIL import Image, ImageDraw, ImageFont
         from io import BytesIO
     except ImportError:
         return None, "Le paquet Pillow n'est pas installé (ajoute \"Pillow\" à requirements.txt)."
+
+    if couleur_accent and re.match(r"^#[0-9a-fA-F]{6}$", couleur_accent):
+        accent_rgb = tuple(int(couleur_accent[i:i + 2], 16) for i in (1, 3, 5))
+    else:
+        accent_rgb = (201, 163, 92)  # doré Destiny par défaut
 
     TAILLE = 1080
     toile = Image.new("RGB", (TAILLE, TAILLE), color=(13, 13, 15))
@@ -1264,16 +1371,16 @@ def generer_visuel_produit(url_image_produit, nom_produit, prix, nom_boutique, p
     # photo -- pour un message ponctuel (occasion, promo...) sans devoir
     # retoucher la photo elle-même.
     if accroche and accroche.strip():
-        dessin.rectangle([0, 0, TAILLE, 74], fill=(201, 163, 92))
+        dessin.rectangle([0, 0, TAILLE, 74], fill=accent_rgb)
         dessin.text((30, 20), accroche.strip().upper()[:55], font=police(34, gras=True), fill=(22, 21, 26))
 
-    # Bandeau doré en bas avec nom boutique, nom produit et prix.
+    # Bandeau en bas avec nom boutique, nom produit et prix (couleur de thème).
     dessin.rectangle([0, zone_photo_h, TAILLE, TAILLE], fill=(22, 21, 26))
-    dessin.rectangle([0, zone_photo_h, TAILLE, zone_photo_h + 6], fill=(201, 163, 92))
+    dessin.rectangle([0, zone_photo_h, TAILLE, zone_photo_h + 6], fill=accent_rgb)
 
     marge = 50
     y = zone_photo_h + 34
-    dessin.text((marge, y), (nom_boutique or "").upper()[:40], font=police(30, gras=True), fill=(201, 163, 92))
+    dessin.text((marge, y), (nom_boutique or "").upper()[:40], font=police(30, gras=True), fill=accent_rgb)
     y += 48
     dessin.text((marge, y), (nom_produit or "")[:60], font=police(46, gras=True), fill=(234, 228, 216))
     y += 74
@@ -1481,6 +1588,7 @@ def charger_config(marchand_id, _refresh=0):
             "dernier_bilan_date, mot_de_passe_hash, "
             "palier_abonnement, en_vedette, banniere_actif, banniere_titre, "
             "banniere_texte, banniere_code_promo, theme_couleur, banniere_style, "
+            "police_titre, logo_animation, badge_style, badge_texte, "
             "vip_offre_actif, vip_offre_titre, vip_offre_texte, vip_offre_code"
         )
         .eq("id", marchand_id)
@@ -1514,8 +1622,15 @@ def charger_config(marchand_id, _refresh=0):
         "banniere_titre": ligne.get("banniere_titre"),
         "banniere_texte": ligne.get("banniere_texte"),
         "banniere_code_promo": ligne.get("banniere_code_promo"),
-        # 🎨 Identité premium (badge doré + thème couleur + style bannière)
+        # 🎨 Identité premium (badge + thème couleur/police/animations +
+        # style bannière) -- valeurs par défaut = rendu doré Destiny
+        # d'origine, sur lequel l'appli retombe automatiquement dès que le
+        # mode premium est désactivé (voir boutique_premium()).
         "theme_couleur": ligne.get("theme_couleur") or "#c9a35c",
+        "police_titre": ligne.get("police_titre") or "playfair",
+        "logo_animation": ligne.get("logo_animation") or "glow",
+        "badge_style": ligne.get("badge_style") or "shimmer",
+        "badge_texte": ligne.get("badge_texte") or "✨ Aura Luxe",
         "banniere_style": ligne.get("banniere_style") or "classique",
         # 👑 Club VIP
         "vip_offre_actif": bool(ligne.get("vip_offre_actif")),
@@ -1525,30 +1640,71 @@ def charger_config(marchand_id, _refresh=0):
     }
 
 
+# 🎨 Palette de thèmes prêts à l'emploi (module Aura Luxe, premium) -- le
+# marchand peut aussi choisir "Personnalisé" et prendre sa propre couleur
+# via un color picker. "Or Royal" = couleur d'origine Destiny.
+THEMES_PRESETS = {
+    "Or Royal (défaut)": "#c9a35c",
+    "Bleu Professionnel": "#2f6fed",
+    "Vert Émeraude": "#1f8a5f",
+    "Rose Poudré": "#d88bb1",
+    "Argent Élégant": "#9aa4ad",
+    "Rouge Bordeaux": "#8a2942",
+    "Violet Améthyste": "#7c5cbf",
+}
+
+# 🔤 Polices disponibles pour les titres/nom de boutique (module Aura Luxe,
+# premium). Toutes déjà importées dans le <style> global, donc le
+# changement est instantané, sans rechargement de page. "playfair" =
+# police d'origine Destiny.
+POLICES_PRESETS = {
+    "playfair": ("Playfair Display (défaut, élégant)", "'Playfair Display', serif"),
+    "cormorant": ("Cormorant Garamond (classique)", "'Cormorant Garamond', serif"),
+    "montserrat": ("Montserrat (moderne)", "'Montserrat', sans-serif"),
+    "poppins": ("Poppins (doux)", "'Poppins', sans-serif"),
+    "oswald": ("Oswald (impact)", "'Oswald', sans-serif"),
+    "raleway": ("Raleway (minimaliste)", "'Raleway', sans-serif"),
+    "bebas": ("Bebas Neue (affiche)", "'Bebas Neue', cursive"),
+}
+
+
 def injecter_theme_premium(config: dict):
-    """Surcharge la variable CSS --aura-accent avec la couleur choisie par
-    le marchand premium (boutons, badges, halo héro...). Ne fait rien pour
-    une boutique standard -- elle garde le doré par défaut."""
+    """Surcharge les variables CSS de thème (couleur d'accent + police des
+    titres) avec les choix du marchand premium (boutons, badges, halo
+    héro, titres...). Ne fait rien pour une boutique standard -- elle
+    garde le rendu doré / Playfair Display d'origine. C'est ce mécanisme
+    qui garantit le retour automatique à l'apparence initiale dès que le
+    mode premium est désactivé côté Super Admin."""
     if not boutique_premium(config):
         return
     couleur = config.get("theme_couleur") or "#c9a35c"
-    if not re.match(r"^#[0-9a-fA-F]{6}$", couleur):
-        return
-    # Version plus claire de la couleur pour le hover, en éclaircissant
-    # chaque canal RVB de 20% vers le blanc.
-    r, g, b = (int(couleur[i:i + 2], 16) for i in (1, 3, 5))
-    r, g, b = (min(255, int(c + (255 - c) * 0.25)) for c in (r, g, b))
-    couleur_claire = f"#{r:02x}{g:02x}{b:02x}"
+    regles = []
+    if re.match(r"^#[0-9a-fA-F]{6}$", couleur):
+        # Version plus claire de la couleur pour le hover, en éclaircissant
+        # chaque canal RVB de 20% vers le blanc.
+        r, g, b = (int(couleur[i:i + 2], 16) for i in (1, 3, 5))
+        r, g, b = (min(255, int(c + (255 - c) * 0.25)) for c in (r, g, b))
+        couleur_claire = f"#{r:02x}{g:02x}{b:02x}"
+        regles.append(f"--aura-accent: {couleur};")
+        regles.append(f"--aura-accent-clair: {couleur_claire};")
+    police_cle = config.get("police_titre") or "playfair"
+    if police_cle in POLICES_PRESETS:
+        regles.append(f"--aura-font-titre: {POLICES_PRESETS[police_cle][1]};")
+    if regles:
+        st.markdown(f"<style>:root {{ {' '.join(regles)} }}</style>", unsafe_allow_html=True)
+
+
+def afficher_badge_aura(style="shimmer", texte="✨ Aura Luxe"):
+    """Petit badge animé 'Aura Luxe' -- affiché à côté du nom de la
+    boutique pour les visiteurs, uniquement si premium. La couleur suit
+    automatiquement le thème choisi par le marchand (variables CSS
+    --aura-accent), `style` change l'apparence (plein/contour/mat/givré)
+    et `texte` permet de personnaliser le libellé affiché."""
+    classe_style = f" style-{style}" if style and style != "shimmer" else ""
     st.markdown(
-        f"<style>:root {{ --aura-accent: {couleur}; --aura-accent-clair: {couleur_claire}; }}</style>",
+        f'<span class="aura-badge{classe_style}">{html_lib.escape(str(texte or "✨ Aura Luxe"))}</span>',
         unsafe_allow_html=True
     )
-
-
-def afficher_badge_aura():
-    """Petit badge doré animé 'Aura Luxe' -- affiché à côté du nom de la
-    boutique pour les visiteurs, uniquement si premium."""
-    st.markdown('<span class="aura-badge">✨ Aura Luxe</span>', unsafe_allow_html=True)
 
 
 def boutique_premium(config: dict) -> bool:
@@ -1898,6 +2054,12 @@ LOGO_URL = config.get("logo") or ""
 LOGO_SUR = LOGO_URL if re.match(r"^https?://", str(LOGO_URL).strip(), re.IGNORECASE) else ""
 WHATSAPP = re.sub(r"\D", "", str(config.get("whatsapp") or ""))
 
+# 🎨 Thème premium (couleur d'accent + police des titres) -- injecté ici,
+# AVANT le branchement client/admin ci-dessous, pour que les écrans de
+# connexion admin reflètent eux aussi l'identité de la boutique (et pas
+# seulement la vitrine client). Ne fait rien pour une boutique standard.
+injecter_theme_premium(config)
+
 # 🔒 FIX : l'admin n'apparaît plus comme un onglet visible par tous les
 # visiteurs. Seule une personne connaissant l'URL secrète
 # "https://tonapp.streamlit.app/?admin=1" voit l'interface de connexion
@@ -1919,12 +2081,11 @@ if not mode_admin:
     if AUTOREFRESH_DISPONIBLE:
         st_autorefresh(interval=20000, key="rafraichissement_boutique")
 
-    injecter_theme_premium(config)
-    afficher_hero(LOGO_SUR, NOM_BOUTIQUE, SLOGAN_BOUTIQUE)
+    afficher_hero(LOGO_SUR, NOM_BOUTIQUE, SLOGAN_BOUTIQUE, animation_logo=config.get("logo_animation") or "glow")
 
     if boutique_premium(config):
         st.markdown('<div style="text-align:center; margin-top:-12px; margin-bottom:14px;">', unsafe_allow_html=True)
-        afficher_badge_aura()
+        afficher_badge_aura(style=config.get("badge_style") or "shimmer", texte=config.get("badge_texte") or "✨ Aura Luxe")
         st.markdown('</div>', unsafe_allow_html=True)
 
     # 📣 Bannière promo (module Marketing & Pub, premium uniquement) --
@@ -2389,8 +2550,8 @@ if not mode_admin:
 else:
     if not ss.admin_connecte:
         if ss.acces_choisi != "admin":
-            # ---- Écran d'accueil : logo + effet lumineux doré + message de bienvenue ----
-            afficher_hero(LOGO_SUR, f"Bienvenue chez {NOM_BOUTIQUE}", "Comment souhaitez-vous continuer ?")
+            # ---- Écran d'accueil : logo + effet lumineux + message de bienvenue ----
+            afficher_hero(LOGO_SUR, f"Bienvenue chez {NOM_BOUTIQUE}", "Comment souhaitez-vous continuer ?", animation_logo=config.get("logo_animation") or "glow")
             col_client, col_admin = st.columns(2)
             with col_client:
                 if st.button("🛍️ Je suis client / visiteur", use_container_width=True):
@@ -2402,7 +2563,7 @@ else:
                     st.rerun()
         else:
             # ---- Écran de connexion admin (mot de passe) ----
-            afficher_hero(LOGO_SUR, f"Bienvenue chez {NOM_BOUTIQUE}", "Connexion administrateur")
+            afficher_hero(LOGO_SUR, f"Bienvenue chez {NOM_BOUTIQUE}", "Connexion administrateur", animation_logo=config.get("logo_animation") or "glow")
             st.subheader("Connexion admin")
             mdp_admin = st.text_input("Mot de passe", type="password")
             col_connexion, col_retour = st.columns(2)
@@ -3141,11 +3302,11 @@ else:
             # "premium" -- aucun bouton de déblocage n'existe côté marchand.
             if not boutique_premium(config):
                 st.info(
-                    "✨ **Aura Luxe** est le module premium de la boutique (badge doré, "
-                    "thème personnalisé, bannières promo néon, flash sales, collections "
-                    "temporaires, club VIP, visuels réseaux sociaux, mise en vedette dans "
-                    "la vitrine commune, diffusion WhatsApp). Contacte-nous pour l'activer "
-                    "sur ta boutique."
+                    "✨ **Aura Luxe** est le module premium de la boutique (thème complet "
+                    "personnalisable -- couleur, police, animation du logo, style de badge --, "
+                    "bannières promo néon, flash sales, collections temporaires, club VIP, "
+                    "visuels réseaux sociaux, mise en vedette dans la vitrine commune, "
+                    "diffusion WhatsApp). Contacte-nous pour l'activer sur ta boutique."
                 )
             else:
                 st.success("✨ Module Aura Luxe actif sur ta boutique.")
@@ -3157,30 +3318,98 @@ else:
                      "⭐ Mise en vedette", "💬 Diffusion WhatsApp"]
                 )
 
-                # ---- Thème couleur + badge Aura Luxe ----
+                # ---- Thème complet (couleur + police + animation logo + badge) ----
                 with sous_tab_theme:
                     st.caption(
-                        "Le badge ✨ Aura Luxe s'affiche automatiquement sur ta boutique. "
-                        "Choisis une couleur d'accent pour personnaliser boutons et bannières."
+                        "Personnalise l'identité visuelle complète de ta boutique : couleur "
+                        "d'accent, police des titres, animation du logo et style du badge "
+                        "✨ Aura Luxe. Aperçu en direct ci-dessous."
                     )
-                    afficher_badge_aura()
+                    afficher_badge_aura(
+                        style=config.get("badge_style") or "shimmer",
+                        texte=config.get("badge_texte") or "✨ Aura Luxe",
+                    )
                     with st.form("form_theme_couleur"):
-                        couleur_choisie = st.color_picker(
-                            "Couleur d'accent de la boutique",
-                            value=config.get("theme_couleur") or "#c9a35c"
+                        st.markdown("**🎨 Couleur du thème**")
+                        couleur_actuelle = config.get("theme_couleur") or "#c9a35c"
+                        noms_presets = list(THEMES_PRESETS.keys()) + ["Personnalisé"]
+                        preset_actuel = next(
+                            (nom for nom, hexa in THEMES_PRESETS.items() if hexa.lower() == couleur_actuelle.lower()),
+                            "Personnalisé"
                         )
+                        preset_choisi = st.selectbox(
+                            "Thème prédéfini",
+                            noms_presets,
+                            index=noms_presets.index(preset_actuel)
+                        )
+                        if preset_choisi == "Personnalisé":
+                            couleur_choisie = st.color_picker(
+                                "Couleur d'accent personnalisée", value=couleur_actuelle
+                            )
+                        else:
+                            couleur_choisie = THEMES_PRESETS[preset_choisi]
+                            st.color_picker(
+                                "Aperçu de la couleur", value=couleur_choisie, disabled=True
+                            )
+
+                        st.markdown("**🔤 Police des titres**")
+                        cles_polices = list(POLICES_PRESETS.keys())
+                        libelles_polices = [POLICES_PRESETS[c][0] for c in cles_polices]
+                        police_actuelle = config.get("police_titre") or "playfair"
+                        index_police = cles_polices.index(police_actuelle) if police_actuelle in cles_polices else 0
+                        police_choisie_libelle = st.selectbox(
+                            "Police", libelles_polices, index=index_police
+                        )
+                        police_choisie = cles_polices[libelles_polices.index(police_choisie_libelle)]
+
+                        st.markdown("**✨ Animation du logo**")
+                        cles_anim = list(ANIMATIONS_LOGO.keys())
+                        libelles_anim = [ANIMATIONS_LOGO[c] for c in cles_anim]
+                        anim_actuelle = config.get("logo_animation") or "glow"
+                        index_anim = cles_anim.index(anim_actuelle) if anim_actuelle in cles_anim else 0
+                        anim_choisie_libelle = st.selectbox(
+                            "Animation", libelles_anim, index=index_anim
+                        )
+                        anim_choisie = cles_anim[libelles_anim.index(anim_choisie_libelle)]
+
+                        st.markdown("**🏷️ Badge Aura Luxe**")
+                        cles_badge = list(STYLES_BADGE_AURA.keys())
+                        libelles_badge = [STYLES_BADGE_AURA[c] for c in cles_badge]
+                        style_badge_actuel = config.get("badge_style") or "shimmer"
+                        index_badge = cles_badge.index(style_badge_actuel) if style_badge_actuel in cles_badge else 0
+                        style_badge_libelle = st.selectbox(
+                            "Style du badge", libelles_badge, index=index_badge
+                        )
+                        style_badge_choisi = cles_badge[libelles_badge.index(style_badge_libelle)]
+                        texte_badge_choisi = st.text_input(
+                            "Texte affiché sur le badge",
+                            value=config.get("badge_texte") or "✨ Aura Luxe",
+                            max_chars=30
+                        )
+
                         if st.form_submit_button("💾 Enregistrer le thème"):
                             try:
                                 sb_admin.table("marchands").update({
                                     "theme_couleur": couleur_choisie,
+                                    "police_titre": police_choisie,
+                                    "logo_animation": anim_choisie,
+                                    "badge_style": style_badge_choisi,
+                                    "badge_texte": texte_badge_choisi.strip() or "✨ Aura Luxe",
                                 }).eq("id", MARCHAND_ID).execute()
                             except Exception:
-                                logger.exception("Échec enregistrement thème couleur")
+                                logger.exception("Échec enregistrement thème")
                                 st.error("❌ L'enregistrement a échoué. Réessaie dans un instant.")
                             else:
                                 forcer_rafraichissement()
                                 st.success("Thème mis à jour.")
                                 st.rerun()
+
+                    st.caption(
+                        "ℹ️ Si le mode Aura Luxe venait à être désactivé, la boutique "
+                        "reprend automatiquement son apparence dorée d'origine (couleur, "
+                        "police et animations par défaut) -- ces réglages restent "
+                        "enregistrés et reprennent effet dès la réactivation."
+                    )
 
                 # ---- Bannière promo interne à la boutique ----
                 with sous_tab_banniere:
@@ -3325,6 +3554,7 @@ else:
                                     prix_promo=ligne_produit.get("prix_promo"),
                                     nom_boutique=config.get("nom_boutique"),
                                     accroche=accroche_visuel,
+                                    couleur_accent=config.get("theme_couleur"),
                                 )
                             if erreur_visuel:
                                 st.error(f"❌ {erreur_visuel}")
