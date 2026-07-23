@@ -1254,7 +1254,7 @@ def _generer_via_gemini(prompt, max_tokens):
     if not cle:
         return None
     reponse = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={cle}",
+        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={cle}",
         json={
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.85},
@@ -1294,6 +1294,7 @@ def generer_texte_ia(prompt, max_tokens=400):
         ("DeepSeek", _generer_via_deepseek),
     ]
     aucune_cle = True
+    dernieres_erreurs = []
     for nom_fournisseur, fonction in fournisseurs:
         if not _cle_secrete({"Groq": "GROQ_API_KEY", "Gemini": "GEMINI_API_KEY", "DeepSeek": "DEEPSEEK_API_KEY"}[nom_fournisseur]):
             continue
@@ -1302,12 +1303,17 @@ def generer_texte_ia(prompt, max_tokens=400):
             texte = fonction(prompt, max_tokens)
             if texte:
                 return texte, None
-        except Exception:
+            dernieres_erreurs.append(f"{nom_fournisseur} : réponse vide")
+        except Exception as exc:
             logger.exception(f"Échec génération IA via {nom_fournisseur}, tentative du fournisseur suivant")
+            dernieres_erreurs.append(f"{nom_fournisseur} : {exc}")
             continue
     if aucune_cle:
         return None, "Aucune clé API IA n'est configurée (GROQ_API_KEY / GEMINI_API_KEY / DEEPSEEK_API_KEY)."
-    return None, "Les 3 fournisseurs IA ont échoué (quota, réseau...). Réessaie dans un instant."
+    # 🔎 Détail technique inclus volontairement -- cet écran est réservé au
+    # marchand/admin (pas affiché aux clients), donc utile pour diagnostiquer
+    # une clé invalide, un quota dépassé ou un modèle retiré par le fournisseur.
+    return None, "Les fournisseurs IA configurés ont échoué : " + " | ".join(dernieres_erreurs)
 
 
 # ====================== 3ter. GÉNÉRATEUR DE VISUEL RÉSEAUX SOCIAUX (module premium) ======================
@@ -1318,23 +1324,58 @@ def generer_texte_ia(prompt, max_tokens=400):
 # Nécessite Pillow + numpy (déjà utilisés ailleurs dans l'app).
 
 def _police_visuel(taille, style="sans_bold"):
-    """Charge une police avec repli silencieux si un fichier manque.
-    `style` : "serif_bold" / "serif" (titraille chic) ou "sans_bold" / "sans"
-    (texte courant). DejaVu Serif/Sans sont livrées par défaut avec Pillow
-    sur la quasi-totalité des serveurs Linux (paquet fonts-dejavu-core)."""
+    """Charge une police avec repli en cascade. `style` : "serif_bold" /
+    "serif" (titraille chic) ou "sans_bold" / "sans" (texte courant).
+    Essaie d'abord les polices système DejaVu (présentes sur la plupart des
+    serveurs Linux), puis celles embarquées par matplotlib si le paquet est
+    installé, et ne retombe QUE EN DERNIER RECOURS sur la police par défaut
+    de Pillow -- mais en lui demandant explicitement `taille` (Pillow >= 10.1
+    sait la redimensionner nettement ; l'ancien repli, une bitmap minuscule
+    figée à ~10px, est ce qui rendait le texte illisible sur certains
+    serveurs où aucune police système n'est présente)."""
     from PIL import ImageFont
     chemins_par_style = {
-        "serif_bold": ["/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"],
-        "serif": ["/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"],
-        "sans_bold": ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"],
-        "sans": ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"],
+        "serif_bold": [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+            "/usr/share/fonts/dejavu/DejaVuSerif-Bold.ttf",
+        ],
+        "serif": [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+            "/usr/share/fonts/dejavu/DejaVuSerif.ttf",
+        ],
+        "sans_bold": [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+        ],
+        "sans": [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        ],
     }
     for chemin in chemins_par_style.get(style, chemins_par_style["sans_bold"]):
         try:
             return ImageFont.truetype(chemin, taille)
         except Exception:
             continue
-    return ImageFont.load_default()
+    # 🔒 Repli n°2 : polices embarquées avec matplotlib (souvent déjà présent
+    # comme dépendance de plotly/pandas dans l'environnement Python lui-même,
+    # donc indépendant des paquets système de la machine).
+    try:
+        import matplotlib
+        base = os.path.join(matplotlib.get_data_path(), "fonts", "ttf")
+        nom_fichier = {
+            "serif_bold": "DejaVuSerif-Bold.ttf", "serif": "DejaVuSerif.ttf",
+            "sans_bold": "DejaVuSans-Bold.ttf", "sans": "DejaVuSans.ttf",
+        }.get(style, "DejaVuSans-Bold.ttf")
+        return ImageFont.truetype(os.path.join(base, nom_fichier), taille)
+    except Exception:
+        pass
+    # 🔒 Repli final : police vectorielle intégrée à Pillow -- toujours
+    # disponible, quel que soit le serveur, et correctement mise à l'échelle.
+    try:
+        return ImageFont.load_default(size=taille)
+    except TypeError:
+        return ImageFont.load_default()  # Pillow < 10.1 : pas de paramètre size
 
 
 def _texte_espace(dessin, centre_x, y, texte, font, fill, suivi=4):
@@ -1436,7 +1477,13 @@ def generer_visuel_produit(url_image_produit, nom_produit, prix, nom_boutique, p
     `description_marketing` : phrase marketing complète (ex: générée par
     l'IA), affichée en évidence sous le nom du produit.
     `couleur_accent` (ex: "#2f6fed") reprend la couleur de thème choisie par
-    le marchand premium -- doré Destiny par défaut si absente/invalide."""
+    le marchand premium -- doré Destiny par défaut si absente/invalide.
+
+    🔎 Le visuel est composé en interne à une résolution 2x (2160x2700) puis
+    réduit à la taille finale (1080x1350) avec un filtre Lanczos : ce
+    sur-échantillonnage élimine le crénelage/"dédoublement" des lettres que
+    l'on obtient en dessinant du texte fin directement à la résolution
+    finale, et donne un rendu net même une fois réaffiché en miniature."""
     try:
         from PIL import Image, ImageDraw
         from io import BytesIO
@@ -1449,13 +1496,16 @@ def generer_visuel_produit(url_image_produit, nom_produit, prix, nom_boutique, p
         accent_rgb = (201, 163, 92)  # doré Destiny par défaut
     accent_clair_rgb = tuple(min(255, c + 35) for c in accent_rgb)
 
-    LARGEUR, HAUTEUR = 1080, 1350  # format 4:5 -- occupe le maximum d'écran dans le flux Instagram/Facebook
-    MARGE_CADRE = 26
+    SCALE = 2  # sur-échantillonnage -- voir docstring
+    BASE_LARGEUR, BASE_HAUTEUR = 1080, 1350  # format 4:5 final -- optimisé Instagram/Facebook
+    LARGEUR, HAUTEUR = BASE_LARGEUR * SCALE, BASE_HAUTEUR * SCALE
+    MARGE_CADRE = 26 * SCALE
+
     toile = Image.new("RGB", (LARGEUR, HAUTEUR), color=(11, 11, 13))
     dessin = ImageDraw.Draw(toile)
 
     # ---- Photo produit : couvre le haut du visuel, coins hauts arrondis + vignette ----
-    zone_photo_h = int(HAUTEUR * 0.60)
+    zone_photo_h = int(HAUTEUR * 0.58)
     if url_image_produit:
         try:
             reponse = requests.get(url_image_produit, timeout=15)
@@ -1467,84 +1517,109 @@ def generer_visuel_produit(url_image_produit, nom_produit, prix, nom_boutique, p
             haut = (photo.height - zone_photo_h) // 2
             photo = photo.crop((gauche, haut, gauche + LARGEUR, haut + zone_photo_h))
             photo = _assombrir_vignette(photo, intensite=0.28)
-            photo_arrondie = _arrondir_coins_haut(photo, rayon=28)
+            photo_arrondie = _arrondir_coins_haut(photo, rayon=28 * SCALE)
             toile.paste(photo_arrondie, (0, 0), photo_arrondie)
         except Exception:
             pass  # pas de photo -> on garde juste le fond sombre, pas bloquant
 
     # Fondu doux en bas de la photo pour une transition élégante vers le panneau texte
     import numpy as _np
-    fondu_h = 90
+    fondu_h = 90 * SCALE
     alpha_colonne = _np.linspace(0, 235, fondu_h).astype("uint8")          # 0 (haut, transparent) -> 235 (bas, quasi opaque)
-    masque_fondu = _np.tile(alpha_colonne[:, None], (1, LARGEUR))           # (fondu_h, LARGEUR)
-    masque_fondu_img = Image.fromarray(masque_fondu, mode="L")
+    masque_fondu_img = Image.fromarray(_np.tile(alpha_colonne[:, None], (1, LARGEUR)), mode="L")
     noir = Image.new("RGB", (LARGEUR, fondu_h), (11, 11, 13))
     toile.paste(noir, (0, zone_photo_h - fondu_h), masque_fondu_img)
 
     # ---- Ruban d'accroche doré (dégradé shimmer) en haut de la photo ----
     if accroche and accroche.strip():
-        hauteur_ruban = 76
+        hauteur_ruban = 84 * SCALE
         ruban = _degrade_horizontal(LARGEUR, hauteur_ruban, accent_clair_rgb, accent_rgb)
         toile.paste(ruban, (0, 0))
-        dessin.text((MARGE_CADRE + 14, 24), accroche.strip().upper()[:48],
-                    font=_police_visuel(32, "sans_bold"), fill=(22, 21, 26))
+        dessin.text((MARGE_CADRE + 16 * SCALE, 28 * SCALE), accroche.strip().upper()[:44],
+                    font=_police_visuel(36 * SCALE, "sans_bold"), fill=(22, 21, 26))
 
     # ---- Trait fin doré séparant photo et panneau ----
-    dessin.rectangle([0, zone_photo_h, LARGEUR, zone_photo_h + 4], fill=accent_rgb)
+    dessin.rectangle([0, zone_photo_h, LARGEUR, zone_photo_h + 4 * SCALE], fill=accent_rgb)
 
-    # ---- Panneau texte ----
-    marge = 60
+    # ---- Préparation du contenu texte (polices grand format, lisibles même en miniature) ----
+    marge = 64 * SCALE
     largeur_texte = LARGEUR - 2 * marge
-    y = zone_photo_h + 44
 
-    nom_font = _police_visuel(54, "serif_bold")
-    dessin.text((marge, y), _reduire_texte(dessin, (nom_produit or "").strip(), nom_font, largeur_texte),
-                font=nom_font, fill=(240, 236, 227))
-    y += 66
+    nom_font = _police_visuel(64 * SCALE, "serif_bold")
+    desc_font = _police_visuel(32 * SCALE, "sans")
+    prix_font = _police_visuel(60 * SCALE, "serif_bold")
+    prix_barre_font = _police_visuel(32 * SCALE, "sans")
+    signature_font = _police_visuel(32 * SCALE, "serif_bold")
 
-    if description_marketing and description_marketing.strip():
-        desc_font = _police_visuel(28, "sans")
-        for ligne in _plier_texte(dessin, description_marketing.strip(), desc_font, largeur_texte, max_lignes=2):
-            dessin.text((marge, y), ligne, font=desc_font, fill=(191, 184, 168))
-            y += 38
-        y += 14
-    else:
-        y += 10
+    nom_affiche = _reduire_texte(dessin, (nom_produit or "").strip(), nom_font, largeur_texte)
+    lignes_desc = (
+        _plier_texte(dessin, description_marketing.strip(), desc_font, largeur_texte, max_lignes=2)
+        if description_marketing and description_marketing.strip() else []
+    )
+    signature = (nom_boutique or "").strip().upper()[:36]
+
+    # ---- Calcul des hauteurs pour centrer le bloc verticalement dans le panneau
+    #      (évite le grand vide en bas obtenu quand le contenu est simplement
+    #      empilé depuis le haut sans tenir compte de l'espace disponible) ----
+    interligne_desc = int(32 * SCALE * 1.35)
+    h_titre = int(64 * SCALE * 1.2)
+    h_desc = len(lignes_desc) * interligne_desc
+    h_prix = int(60 * SCALE * 1.55)
+    h_signature = int(32 * SCALE * 1.3)
+    espace_titre_desc = int(20 * SCALE) if lignes_desc else 0
+    espace_avant_prix = int(34 * SCALE)
+    espace_avant_signature = int(48 * SCALE)
+
+    hauteur_bloc = h_titre + espace_titre_desc + h_desc + espace_avant_prix + h_prix + espace_avant_signature + h_signature
+    haut_panneau = zone_photo_h + 8 * SCALE
+    bas_panneau = HAUTEUR - 50 * SCALE
+    y = haut_panneau + max(30 * SCALE, (bas_panneau - haut_panneau - hauteur_bloc) // 2)
+
+    # ---- Nom du produit ----
+    dessin.text((marge, y), nom_affiche, font=nom_font, fill=(240, 236, 227))
+    y += h_titre + espace_titre_desc
+
+    # ---- Description marketing ----
+    for ligne in lignes_desc:
+        dessin.text((marge, y), ligne, font=desc_font, fill=(199, 192, 176))
+        y += interligne_desc
+    y += espace_avant_prix
 
     # ---- Prix (badge promo doré si applicable) ----
-    prix_font = _police_visuel(50, "serif_bold")
     if prix_promo and float(prix_promo) > 0 and float(prix_promo) < float(prix or 0):
         texte_prix = f"{int(prix_promo)} FCFA"
         texte_ancien = f"{int(prix)} FCFA"
         largeur_prix = dessin.textlength(texte_prix, font=prix_font)
         dessin.rounded_rectangle(
-            [marge - 16, y - 12, marge + largeur_prix + 32, y + 62], radius=14, fill=accent_rgb
+            [marge - 20 * SCALE, y - 14 * SCALE, marge + largeur_prix + 40 * SCALE, y + h_prix - 14 * SCALE],
+            radius=16 * SCALE, fill=accent_rgb
         )
         dessin.text((marge, y), texte_prix, font=prix_font, fill=(22, 21, 26))
-        dessin.text((marge + largeur_prix + 46, y + 16), texte_ancien,
-                    font=_police_visuel(30, "sans"), fill=(133, 127, 115))
+        dessin.text((marge + largeur_prix + 56 * SCALE, y + 18 * SCALE), texte_ancien,
+                    font=prix_barre_font, fill=(140, 134, 122))
     else:
         dessin.text((marge, y), f"{int(prix or 0)} FCFA", font=prix_font, fill=(240, 236, 227))
-    y += 92
+    y += h_prix + espace_avant_signature
 
     # ---- Signature boutique (façon maison de luxe : capitales espacées, encadrées de traits fins) ----
-    signature = (nom_boutique or "").strip().upper()[:36]
     if signature:
-        signature_font = _police_visuel(26, "serif_bold")
         centre_x = LARGEUR // 2
-        largeur_signature = sum(dessin.textlength(c, font=signature_font) for c in signature) + 4 * (len(signature) - 1)
+        largeur_signature = sum(dessin.textlength(c, font=signature_font) for c in signature) + 5 * SCALE * (len(signature) - 1)
         demi = largeur_signature / 2
-        y_ligne = y + 17
-        dessin.line([(marge, y_ligne), (centre_x - demi - 22, y_ligne)], fill=accent_rgb, width=1)
-        dessin.line([(centre_x + demi + 22, y_ligne), (LARGEUR - marge, y_ligne)], fill=accent_rgb, width=1)
-        _texte_espace(dessin, centre_x, y, signature, signature_font, accent_rgb, suivi=4)
+        y_ligne = y + h_signature // 2
+        dessin.line([(marge, y_ligne), (centre_x - demi - 26 * SCALE, y_ligne)], fill=accent_rgb, width=2)
+        dessin.line([(centre_x + demi + 26 * SCALE, y_ligne), (LARGEUR - marge, y_ligne)], fill=accent_rgb, width=2)
+        _texte_espace(dessin, centre_x, y, signature, signature_font, accent_rgb, suivi=5 * SCALE)
 
     # ---- Fin liseré doré tout autour du visuel (cadre premium) ----
     dessin.rectangle([MARGE_CADRE // 2, MARGE_CADRE // 2, LARGEUR - MARGE_CADRE // 2, HAUTEUR - MARGE_CADRE // 2],
-                      outline=accent_rgb, width=2)
+                      outline=accent_rgb, width=2 * SCALE)
+
+    # ---- Réduction finale (2x -> 1x) : lisse le crénelage, rendu net à toute taille d'affichage ----
+    toile_finale = toile.resize((BASE_LARGEUR, BASE_HAUTEUR), Image.LANCZOS)
 
     tampon = BytesIO()
-    toile.save(tampon, format="PNG")
+    toile_finale.save(tampon, format="PNG")
     return tampon.getvalue(), None
 
 
@@ -3807,8 +3882,9 @@ else:
                 # ---- Générateur de visuel pour réseaux sociaux ----
                 with sous_tab_visuel:
                     st.caption(
-                        "Génère une image prête à publier (format carré) pour un article "
-                        "de ton catalogue, avec ton nom de boutique, le nom de l'article et son prix."
+                        "Génère une image prête à publier (format portrait 4:5, optimisé "
+                        "Instagram/Facebook) pour un article de ton catalogue, avec ton nom "
+                        "de boutique en signature, le nom de l'article et son prix."
                     )
                     if df_catalogue.empty:
                         st.caption("Ajoute d'abord des articles dans l'onglet Catalogue.")
@@ -3817,7 +3893,7 @@ else:
                         produit_choisi = st.selectbox("Article", options_produits, key="visuel_produit_choisi")
                         ligne_produit = df_catalogue[df_catalogue["nom"] == produit_choisi].iloc[0]
 
-                        with st.expander("🤖 Suggérer une accroche avec l'IA"):
+                        with st.expander("🤖 Suggérer une accroche avec l'IA", expanded=True):
                             brief_accroche = st.text_input(
                                 "Occasion ou contexte (facultatif)",
                                 key="brief_accroche_ia",
@@ -3847,7 +3923,7 @@ else:
                             placeholder="Ex : NOUVELLE COLLECTION"
                         )
 
-                        with st.expander("🤖 Suggérer une description marketing avec l'IA"):
+                        with st.expander("🤖 Suggérer une description marketing avec l'IA", expanded=True):
                             st.caption("Une phrase courte et percutante, mise en valeur sous le nom de l'article sur le visuel.")
                             if st.button("🤖 Suggérer une description", key="generer_description_marketing_ia"):
                                 prompt_description = (
