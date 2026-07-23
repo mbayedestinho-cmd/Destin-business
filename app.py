@@ -499,22 +499,64 @@ DUREE_SESSION_ADMIN_SEC = 1800  # 30 minutes d'inactivité avant déconnexion
 
 
 def admin_login(mot_de_passe):
-    """Retourne (succes: bool, message_erreur: str | None)."""
+    """Retourne (succes: bool, message_erreur: str | None).
+    🔒 AUDIT SÉCURITÉ #3 : le verrouillage anti-brute-force vit maintenant
+    côté serveur (table tentatives_connexion via RPC), plus dans
+    st.session_state -- un nouvel onglet privé ne permet plus de
+    contourner la limite de tentatives. En cas d'échec de la RPC (ex:
+    fonction pas encore migrée), on retombe sur l'ancien comportement en
+    session plutôt que de bloquer complètement la connexion."""
+    cle_verrou = f"marchand_{MARCHAND_ID}"
     maintenant = datetime.now(timezone.utc).timestamp()
-    verrou_jusqu_a = st.session_state.get("admin_verrou_jusqu_a", 0)
-    if maintenant < verrou_jusqu_a:
-        restant = int(verrou_jusqu_a - maintenant)
-        return False, f"Trop de tentatives échouées. Réessaie dans {restant} seconde(s)."
+
+    try:
+        verrou = sb.rpc("verifier_verrou_connexion", {"p_cle": cle_verrou}).execute().data
+        if verrou and verrou.get("bloque"):
+            restant = int(verrou.get("secondes_restantes", 0))
+            return False, f"Trop de tentatives échouées. Réessaie dans {restant} seconde(s)."
+    except Exception:
+        logger.warning("RPC verifier_verrou_connexion indisponible, repli sur le verrou de session")
+        verrou_jusqu_a = st.session_state.get("admin_verrou_jusqu_a", 0)
+        if maintenant < verrou_jusqu_a:
+            restant = int(verrou_jusqu_a - maintenant)
+            return False, f"Trop de tentatives échouées. Réessaie dans {restant} seconde(s)."
 
     config_actuelle = charger_config(MARCHAND_ID, st.session_state.refresh_token)
     hash_attendu = config_actuelle.get("mot_de_passe", "")
-    if verifier_mot_de_passe(mot_de_passe, hash_attendu):
+    mot_de_passe_correct = verifier_mot_de_passe(mot_de_passe, hash_attendu)
+
+    try:
+        sb.rpc("enregistrer_tentative_connexion", {
+            "p_cle": cle_verrou, "p_reussite": mot_de_passe_correct,
+            "p_seuil": SEUIL_TENTATIVES_ADMIN, "p_duree_verrou_secondes": DUREE_VERROU_ADMIN_SEC
+        }).execute()
+    except Exception:
+        logger.warning("RPC enregistrer_tentative_connexion indisponible, repli sur le verrou de session")
+
+    if mot_de_passe_correct:
+        # 🔒 AUDIT SÉCURITÉ : un hash SHA-256 (legacy, non salé) est bien
+        # plus rapide à casser par force brute hors-ligne qu'un bcrypt en
+        # cas de fuite de la base. Puisqu'on a le mot de passe en clair ICI
+        # (juste vérifié), on referme la fenêtre de risque en migrant
+        # silencieusement vers bcrypt -- le marchand ne voit aucune
+        # différence, mais son compte n'est plus jamais vulnérable après
+        # cette connexion.
+        if _est_hash_sha256_heritage(hash_attendu):
+            try:
+                get_admin_client().table("marchands").update(
+                    {"mot_de_passe_hash": hash_mot_de_passe(mot_de_passe)}
+                ).eq("id", MARCHAND_ID).execute()
+            except Exception:
+                logger.exception("Échec migration hash mot de passe legacy vers bcrypt")
         st.session_state.admin_connecte = True
         st.session_state.admin_derniere_activite = maintenant
         st.session_state.admin_tentatives = 0
         st.session_state.admin_verrou_jusqu_a = 0
         return True, None
 
+    # Repli local (utilisé seulement si la RPC ci-dessus a échoué) --
+    # sinon le compteur en session reste à 0 et n'a aucun effet, la RPC
+    # ayant déjà fait foi.
     tentatives = st.session_state.get("admin_tentatives", 0) + 1
     st.session_state.admin_tentatives = tentatives
     if tentatives >= SEUIL_TENTATIVES_ADMIN:
