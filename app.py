@@ -1694,6 +1694,14 @@ def injecter_theme_premium(config: dict):
         st.markdown(f"<style>:root {{ {' '.join(regles)} }}</style>", unsafe_allow_html=True)
 
 
+STYLES_BADGE_AURA = {
+    "shimmer": "Doré scintillant (défaut)",
+    "contour": "Contour lumineux",
+    "mat": "Mat professionnel",
+    "glace": "Verre givré",
+}
+
+
 def afficher_badge_aura(style="shimmer", texte="✨ Aura Luxe"):
     """Petit badge animé 'Aura Luxe' -- affiché à côté du nom de la
     boutique pour les visiteurs, uniquement si premium. La couleur suit
