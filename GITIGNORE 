@@ -1,0 +1,14 @@
+# 🔒 Secrets -- ne JAMAIS committer ce fichier
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Système / éditeurs
+.DS_Store
+.vscode/
+.idea/
