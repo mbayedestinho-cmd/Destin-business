@@ -1589,7 +1589,8 @@ def charger_config(marchand_id, _refresh=0):
             "palier_abonnement, en_vedette, banniere_actif, banniere_titre, "
             "banniere_texte, banniere_code_promo, theme_couleur, banniere_style, "
             "police_titre, logo_animation, badge_style, badge_texte, "
-            "vip_offre_actif, vip_offre_titre, vip_offre_texte, vip_offre_code"
+            "vip_offre_actif, vip_offre_titre, vip_offre_texte, vip_offre_code, "
+            "delai_relance_panier_h, seuil_stock_urgence"
         )
         .eq("id", marchand_id)
         .execute()
@@ -1637,6 +1638,15 @@ def charger_config(marchand_id, _refresh=0):
         "vip_offre_titre": ligne.get("vip_offre_titre"),
         "vip_offre_texte": ligne.get("vip_offre_texte"),
         "vip_offre_code": ligne.get("vip_offre_code"),
+        # 🛒 Relance panier abandonné (semi-auto) -- délai en heures après
+        # lequel un panier devient "prêt à relancer" ; calculé côté cron
+        # (voir scripts/taches_planifiees.py) mais aussi utilisé côté
+        # affichage admin pour le tri/badge en temps réel.
+        "delai_relance_panier_h": int(ligne.get("delai_relance_panier_h") or 24),
+        # ⚡ Preuve sociale : en dessous de ce seuil, on affiche "il ne
+        # reste que N !" sur la fiche produit (distinct du seuil d'alerte
+        # email admin plus haut, généralement plus bas).
+        "seuil_stock_urgence": int(ligne.get("seuil_stock_urgence") or 5),
     }
 
 
@@ -1764,6 +1774,66 @@ def charger_avis_moyennes(marchand_id, _refresh=0):
         cle: {"moyenne": round(v["somme"] / v["count"], 1), "count": v["count"]}
         for cle, v in par_article.items()
     }
+
+
+# ====================== 6ter. PREUVE SOCIALE / URGENCE ======================
+@st.cache_data(ttl=60)
+def charger_vues_articles_jour(marchand_id, _refresh=0):
+    """Nombre de vues aujourd'hui par article (clé = nom normalisé), pour le
+    badge « X personnes ont vu cet article aujourd'hui »."""
+    aujourdhui = datetime.now(timezone.utc).date().isoformat()
+    try:
+        reponse = (
+            sb.table("vues_articles")
+            .select("article_nom, compteur")
+            .eq("marchand_id", marchand_id)
+            .eq("jour", aujourdhui)
+            .execute()
+        )
+    except Exception:
+        return {}
+    return {normaliser(r.get("article_nom")): int(r.get("compteur") or 0) for r in (reponse.data or [])}
+
+
+def enregistrer_vue_article(nom_article, identifiant_produit):
+    """Incrémente le compteur de vues du jour pour cet article, au plus une
+    fois par session (via throttle) pour éviter qu'un rechargement de page
+    ne gonfle artificiellement le chiffre affiché aux autres visiteurs."""
+    if not throttle(f"vue_{identifiant_produit}", 3600):
+        return
+    try:
+        sb.rpc("enregistrer_vue_article", {
+            "p_article": nom_article,
+            "p_marchand_id": MARCHAND_ID
+        }).execute()
+    except Exception:
+        pass  # jamais bloquant : la preuve sociale est un bonus, pas une fonction critique
+
+
+@st.cache_data(ttl=300)
+def charger_meilleure_vente_du_mois(marchand_id, _refresh=0):
+    """Nom (normalisé) de l'article le plus commandé depuis le 1er du mois
+    en cours, pour le bandeau « 🔥 Meilleure vente » auto-attribué."""
+    debut_mois = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    try:
+        reponse = (
+            sb.table("commandes")
+            .select("articles")
+            .eq("marchand_id", marchand_id)
+            .gte("date", debut_mois.isoformat())
+            .execute()
+        )
+    except Exception:
+        return None
+    compteur = {}
+    for cmd in (reponse.data or []):
+        for art in (cmd.get("articles") or []):
+            cle = normaliser(art.get("nom", ""))
+            if cle:
+                compteur[cle] = compteur.get(cle, 0) + (art.get("quantite") or 0)
+    if not compteur:
+        return None
+    return max(compteur, key=compteur.get)
 
 
 if "refresh_token" not in ss:
@@ -2160,6 +2230,12 @@ if not mode_admin:
                     if collection_choisie != "Toutes":
                         df_affiche = df_affiche[df_affiche["collection_id"] == noms_collections[collection_choisie]]
 
+            # ⚡ Preuve sociale / urgence -- chargés une seule fois pour toute
+            # la grille (pas par produit) pour limiter les appels réseau.
+            vues_du_jour = charger_vues_articles_jour(MARCHAND_ID, ss.refresh_token)
+            meilleure_vente = charger_meilleure_vente_du_mois(MARCHAND_ID, ss.refresh_token)
+            seuil_urgence_stock = int(config.get("seuil_stock_urgence", 5) or 5)
+
             colonnes_grille = st.columns(3)
             for idx, (_, row) in enumerate(df_affiche.iterrows()):
                 with colonnes_grille[idx % 3]:
@@ -2177,10 +2253,21 @@ if not mode_admin:
                     if toutes_images:
                         afficher_galerie_swipe(toutes_images, hauteur=280, cle=f"prod_{idx}")
 
+                    enregistrer_vue_article(str(row["nom"]).strip(), identifiant_produit)
+
+                    badge_meilleure_vente = (
+                        '<div class="destiny-promo-badge" style="display:inline-block; margin-bottom:6px;">🔥 Meilleure vente du mois</div>'
+                        if meilleure_vente and identifiant_produit == meilleure_vente
+                        else ""
+                    )
                     st.markdown(
-                        f'<div class="destiny-nom-produit">{nom_affiche}</div>',
+                        f'{badge_meilleure_vente}<div class="destiny-nom-produit">{nom_affiche}</div>',
                         unsafe_allow_html=True
                     )
+
+                    vues_jour_produit = vues_du_jour.get(identifiant_produit, 0)
+                    if vues_jour_produit >= 5:
+                        st.caption(f"👀 {vues_jour_produit} personne(s) ont vu cet article aujourd'hui")
 
                     info_avis = (
                         avis_moyennes.get(identifiant_produit)
@@ -2265,6 +2352,8 @@ if not mode_admin:
                                     except Exception:
                                         st.error("Une erreur est survenue, merci de réessayer.")
                     else:
+                        if 0 < stock <= seuil_urgence_stock:
+                            st.warning(f"⚡ Il ne reste que {stock} en stock !")
                         options_taille = [t.strip() for t in str(row.get("tailles") or "").split(",") if t.strip()]
                         options_couleur = [c.strip() for c in str(row.get("couleurs") or "").split(",") if c.strip()]
                         taille_choisie = st.selectbox("Taille", options_taille, key=f"taille_{idx}") if options_taille else ""
@@ -2839,9 +2928,9 @@ else:
                 .limit(100)
                 .execute()
             )
-            statuts_possibles = ["En cours", "Confirmée", "Livrée", "Annulée"]
+            statuts_possibles = ["En cours", "Confirmée", "Payée", "Livrée", "Annulée"]
             couleurs_statut = {
-                "En cours": "#8a7350", "Confirmée": "#c9a35c",
+                "En cours": "#8a7350", "Confirmée": "#c9a35c", "Payée": "#3f8fd6",
                 "Livrée": "#4caf7d", "Annulée": "#e35d5d"
             }
             commandes_data = reponse.data or []
@@ -2934,11 +3023,20 @@ else:
                     if ss.get(f"notif_statut_{cle_unique}"):
                         tel_client_cmd = re.sub(r"\D", "", str(cmd.get("tel") or ""))
                         statut_envoye = ss[f"notif_statut_{cle_unique}"]
+                        # 🔔 Message clair et précis : référence courte + liste des
+                        # articles, pas juste "votre commande" -- le client doit
+                        # pouvoir identifier la commande concernée sans ambiguïté.
+                        recap_articles = ", ".join(
+                            f"{a.get('nom', '?')} x{int(a.get('quantite') or 0)}" for a in articles_cmd
+                        ) or "vos articles"
+                        nom_boutique_msg = config.get('nom_boutique', 'notre boutique')
+                        prefixe_commande = f"votre commande {reference_courte} ({recap_articles}, {int(total_cmd)} FCFA)"
                         messages_par_statut = {
-                            "En cours": f"Bonjour {cmd.get('client_nom') or ''}, votre commande chez {config.get('nom_boutique', 'notre boutique')} est en cours de préparation. Nous vous tiendrons informé(e) !",
-                            "Confirmée": f"Bonjour {cmd.get('client_nom') or ''}, bonne nouvelle : votre commande chez {config.get('nom_boutique', 'notre boutique')} est confirmée !",
-                            "Livrée": f"Bonjour {cmd.get('client_nom') or ''}, votre commande chez {config.get('nom_boutique', 'notre boutique')} a été livrée. Merci pour votre confiance !",
-                            "Annulée": f"Bonjour {cmd.get('client_nom') or ''}, votre commande chez {config.get('nom_boutique', 'notre boutique')} a été annulée. N'hésitez pas à nous contacter pour toute question.",
+                            "En cours": f"Bonjour {cmd.get('client_nom') or ''}, {prefixe_commande} chez {nom_boutique_msg} est en cours de préparation. Nous vous tiendrons informé(e) !",
+                            "Confirmée": f"Bonjour {cmd.get('client_nom') or ''}, bonne nouvelle : {prefixe_commande} chez {nom_boutique_msg} est confirmée !",
+                            "Payée": f"Bonjour {cmd.get('client_nom') or ''}, nous confirmons la réception du paiement pour {prefixe_commande} chez {nom_boutique_msg}. Merci !",
+                            "Livrée": f"Bonjour {cmd.get('client_nom') or ''}, {prefixe_commande} chez {nom_boutique_msg} a été livrée. Merci pour votre confiance !",
+                            "Annulée": f"Bonjour {cmd.get('client_nom') or ''}, {prefixe_commande} chez {nom_boutique_msg} a été annulée. N'hésitez pas à nous contacter pour toute question.",
                         }
                         message_statut = st.text_area(
                             "Message au client",
@@ -3174,6 +3272,25 @@ else:
                     min_value=0, max_value=23, value=heure_defaut
                 )
 
+                st.write("**Relance panier abandonné & preuve sociale**")
+                try:
+                    delai_relance_defaut = int(config.get("delai_relance_panier_h", 24) or 24)
+                except (TypeError, ValueError):
+                    delai_relance_defaut = 24
+                try:
+                    seuil_urgence_defaut = int(config.get("seuil_stock_urgence", 5) or 5)
+                except (TypeError, ValueError):
+                    seuil_urgence_defaut = 5
+                delai_relance_input = st.number_input(
+                    "Relancer un panier abandonné après (heures)",
+                    min_value=1, max_value=168, step=1, value=delai_relance_defaut,
+                    help="Passé ce délai, le panier remonte en haut de l'onglet « Paniers abandonnés » avec un badge « Prêt à relancer »."
+                )
+                seuil_urgence_input = st.number_input(
+                    "Afficher « il ne reste que N ! » en dessous de",
+                    min_value=1, max_value=50, step=1, value=seuil_urgence_defaut
+                )
+
                 if st.form_submit_button("Enregistrer"):
                     try:
                         sb_admin.table("marchands").update({
@@ -3181,6 +3298,8 @@ else:
                             "email_contact": email_admin_input,
                             "seuil_stock_bas": int(seuil_stock_input),
                             "heure_bilan": int(heure_bilan_input),
+                            "delai_relance_panier_h": int(delai_relance_input),
+                            "seuil_stock_urgence": int(seuil_urgence_input),
                         }).eq("id", MARCHAND_ID).execute()
                     except Exception:
                         logger.exception("Échec enregistrement config contact/alertes")
@@ -3252,14 +3371,39 @@ else:
                             st.rerun()
 
         with tab_paniers:
+            # 🕓 Relance semi-auto : un panier devient "prêt à relancer" une
+            # fois le délai configuré dépassé (voir Config > Relance panier
+            # abandonné). Le job planifié (scripts/taches_planifiees.py) pose
+            # aussi ce badge en base pour pouvoir prévenir l'admin par email,
+            # mais on recalcule ici en direct pour ne pas dépendre du cron.
+            delai_relance_h = int(config.get("delai_relance_panier_h", 24) or 24)
             reponse = sb_admin.table("paniersabandonnés").select("*").eq("statut", "en_attente").eq("marchand_id", MARCHAND_ID).execute()
-            paniers = sorted(reponse.data, key=lambda p: p.get("date_derniere_maj", ""), reverse=True)
+            maintenant_utc = datetime.now(timezone.utc)
+
+            def _heures_ecoulees(panier):
+                try:
+                    horodatage = pd.to_datetime(panier.get("date_derniere_maj"), utc=True)
+                    return (maintenant_utc - horodatage.to_pydatetime()).total_seconds() / 3600
+                except Exception:
+                    return 0
+
+            paniers = reponse.data or []
+            for p in paniers:
+                p["_heures_ecoulees"] = _heures_ecoulees(p)
+                p["_pret_a_relancer"] = p["_heures_ecoulees"] >= delai_relance_h
+            paniers.sort(key=lambda p: (not p["_pret_a_relancer"], -p["_heures_ecoulees"]))
+
+            nb_prets = sum(1 for p in paniers if p["_pret_a_relancer"])
             if not paniers:
                 st.caption("Aucun panier abandonné en attente")
+            elif nb_prets:
+                st.info(f"⏰ {nb_prets} panier(s) prêt(s) à relancer (délai de {delai_relance_h}h dépassé)")
+
             for idx, panier in enumerate(paniers):
                 cle_unique = f"{idx}_{panier.get('telephone') or 'sanstelephone'}"
                 total = panier.get("total") or 0
-                with st.expander(f"{panier.get('client_nom') or 'Client'} — {panier.get('telephone')} — {total} FCFA"):
+                badge_pret = " · ⏰ Prêt à relancer" if panier["_pret_a_relancer"] else f" · depuis {int(panier['_heures_ecoulees'])}h"
+                with st.expander(f"{panier.get('client_nom') or 'Client'} — {panier.get('telephone')} — {total} FCFA{badge_pret}"):
                     st.json(panier.get("articles"))
                     tel_relance = re.sub(r"\D", "", str(panier.get("telephone") or ""))
                     message_relance_defaut = f"Bonjour, vous avez laissé des articles dans votre panier sur {config.get('nom_boutique', 'notre boutique')} — puis-je vous aider à finaliser votre commande ?"
