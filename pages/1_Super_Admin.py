@@ -1,5 +1,6 @@
 import streamlit as st
 import bcrypt
+import hmac
 import re
 from datetime import datetime, timezone
 from supabase import create_client, Client
@@ -93,18 +94,48 @@ if not st.session_state.super_admin_connecte:
     st.title("🛠️ Super Admin")
     st.caption("Accès réservé au propriétaire de l'application.")
 
+    # 🔒 AUDIT SÉCURITÉ #3 : verrouillage anti-brute-force côté serveur
+    # (table tentatives_connexion via RPC) -- un nouvel onglet privé ne
+    # permet plus de contourner la limite de tentatives, contrairement à
+    # l'ancien compteur en st.session_state. Clé unique globale puisqu'il
+    # n'y a qu'un seul mot de passe maître pour toute la plateforme.
+    CLE_VERROU_SUPER_ADMIN = "super_admin_global"
     maintenant = datetime.now(timezone.utc).timestamp()
-    verrou_jusqu_a = st.session_state.get("super_admin_verrou_jusqu_a", 0)
-    if maintenant < verrou_jusqu_a:
-        restant = int(verrou_jusqu_a - maintenant)
-        st.error(f"Trop de tentatives échouées. Réessaie dans {restant} seconde(s).")
-        st.stop()
+
+    try:
+        verrou = sb.rpc("verifier_verrou_connexion", {"p_cle": CLE_VERROU_SUPER_ADMIN}).execute().data
+        if verrou and verrou.get("bloque"):
+            restant = int(verrou.get("secondes_restantes", 0))
+            st.error(f"Trop de tentatives échouées. Réessaie dans {restant} seconde(s).")
+            st.stop()
+    except Exception:
+        verrou_jusqu_a = st.session_state.get("super_admin_verrou_jusqu_a", 0)
+        if maintenant < verrou_jusqu_a:
+            restant = int(verrou_jusqu_a - maintenant)
+            st.error(f"Trop de tentatives échouées. Réessaie dans {restant} seconde(s).")
+            st.stop()
 
     with st.form("super_admin_login"):
         mdp = st.text_input("Mot de passe maître", type="password")
         if st.form_submit_button("Se connecter"):
             secret_attendu = st.secrets.get("SUPER_ADMIN_PASSWORD")
-            if secret_attendu and mdp == secret_attendu:
+            # 🔒 AUDIT SÉCURITÉ : comparaison directe (==) vulnérable en
+            # théorie à une attaque temporelle (timing attack) -- un
+            # attaquant mesure les micro-différences de temps de réponse
+            # pour deviner le mot de passe caractère par caractère.
+            # hmac.compare_digest() compare en temps constant.
+            mot_de_passe_correct = bool(secret_attendu) and hmac.compare_digest(
+                mdp.encode("utf-8"), secret_attendu.encode("utf-8")
+            )
+            try:
+                sb.rpc("enregistrer_tentative_connexion", {
+                    "p_cle": CLE_VERROU_SUPER_ADMIN, "p_reussite": mot_de_passe_correct,
+                    "p_seuil": SEUIL_TENTATIVES, "p_duree_verrou_secondes": DUREE_VERROU_SEC
+                }).execute()
+            except Exception:
+                pass  # repli silencieux -- le compteur de session ci-dessous prend le relais
+
+            if mot_de_passe_correct:
                 st.session_state.super_admin_connecte = True
                 st.session_state.super_admin_tentatives = 0
                 st.rerun()
