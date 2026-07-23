@@ -458,40 +458,81 @@ if MARCHAND["statut_abonnement"] not in ("actif", "en_grace"):
     st.stop()
 
 
-# 🔒 ISOLATION MULTI-TENANT (fix pro) : une session (un onglet navigateur)
-# doit rester strictement attachée à UNE SEULE boutique. Sans ce garde-fou,
-# un visiteur qui changerait de lien ?boutique=... dans le MÊME onglet (ex :
-# un marchand teste sa boutique puis suit le lien d'un confrère, ou colle
-# une autre URL) hériterait silencieusement de l'état de la boutique
-# précédente -- panier, favoris, et surtout une éventuelle SESSION ADMIN déjà
-# ouverte, ce qui donnerait accès au panneau admin de la nouvelle boutique
-# sans jamais avoir saisi son mot de passe. On détecte donc tout changement
-# de MARCHAND_ID dans la session et on réinitialise entièrement l'état
-# propre à une boutique avant de continuer le rendu de la page.
-CLES_SESSION_PAR_BOUTIQUE = [
-    "acces_choisi", "accroche_visuel_generee", "admin_connecte",
-    "admin_derniere_activite", "admin_tentatives", "admin_verrou_jusqu_a",
-    "alerte_upload_catalogue", "banniere_code_genere", "banniere_texte_genere",
-    "banniere_titre_genere", "cart", "dernier_panier_signature", "favoris",
-    "ia_calendrier_genere", "ia_description_generee", "ia_offre_genere",
-    "ia_pack_genere", "ia_post_genere", "ia_tunnel_genere", "icone_toast",
-    "jouer_son", "message_toast", "otp_suivi", "refresh_token",
-]
+# 🔒 ISOLATION MULTI-TENANT (fix pro, v2 -- namespacing automatique) :
+# l'ancienne version maintenait une liste explicite des clés "par boutique"
+# (CLES_SESSION_PAR_BOUTIQUE) et les effaçait au changement de MARCHAND_ID.
+# Risque structurel : toute NOUVELLE clé de session_state ajoutée plus tard
+# dans le code et oubliée dans cette liste fuit silencieusement d'une
+# boutique à l'autre (panier, favoris, ou pire, admin_connecte).
+#
+# Ici, on élimine la liste : `ss` est un proxy qui remplace st.session_state
+# partout dans le reste du fichier et namespace AUTOMATIQUEMENT chaque clé
+# par MARCHAND_ID ("m<id>__cart" au lieu de "cart"). Deux boutiques ne
+# peuvent plus jamais partager une clé, y compris pour du code écrit après
+# ce commentaire -- il n'y a plus rien à maintenir ni à oublier.
+#
+# Seules "boutique_slug" et "_boutique_verrouillee_id" restent volontairement
+# hors namespace : ce sont des clés de "bootstrap" lues AVANT de connaître
+# MARCHAND_ID (résolution du slug depuis l'URL), donc elles continuent
+# d'utiliser st.session_state directement (voir determiner_slug_boutique).
+class EtatBoutique:
+    """Proxy transparent autour de st.session_state, namespacé par MARCHAND_ID.
 
-if st.session_state.get("_boutique_verrouillee_id") not in (None, MARCHAND_ID):
-    for _cle in CLES_SESSION_PAR_BOUTIQUE:
-        st.session_state.pop(_cle, None)
-    # Le panier/favoris de l'ancienne boutique ne doivent pas non plus
-    # survivre dans l'URL, sinon ils seraient réimportés au prochain rerun.
-    for _cle_url in ("panier", "favoris"):
-        if _cle_url in st.query_params:
-            del st.query_params[_cle_url]
+    Supporte la même API que st.session_state (attribut, [] , get, pop,
+    setdefault, in) -- remplacement direct, aucune autre ligne à changer
+    en dehors du split ci-dessus.
+    """
 
+    _CLES_GLOBALES = {"boutique_slug", "_boutique_verrouillee_id"}
+
+    def __init__(self, get_marchand_id):
+        object.__setattr__(self, "_get_marchand_id", get_marchand_id)
+
+    def _cle(self, cle):
+        if cle in self._CLES_GLOBALES:
+            return cle
+        return f"m{self._get_marchand_id()}__{cle}"
+
+    def __getattr__(self, cle):
+        try:
+            return st.session_state[self._cle(cle)]
+        except KeyError:
+            raise AttributeError(cle)
+
+    def __setattr__(self, cle, valeur):
+        st.session_state[self._cle(cle)] = valeur
+
+    def __delattr__(self, cle):
+        del st.session_state[self._cle(cle)]
+
+    def __getitem__(self, cle):
+        return st.session_state[self._cle(cle)]
+
+    def __setitem__(self, cle, valeur):
+        st.session_state[self._cle(cle)] = valeur
+
+    def __delitem__(self, cle):
+        del st.session_state[self._cle(cle)]
+
+    def __contains__(self, cle):
+        return self._cle(cle) in st.session_state
+
+    def get(self, cle, defaut=None):
+        return st.session_state.get(self._cle(cle), defaut)
+
+    def pop(self, cle, defaut=None):
+        return st.session_state.pop(self._cle(cle), defaut)
+
+    def setdefault(self, cle, defaut=None):
+        return st.session_state.setdefault(self._cle(cle), defaut)
+
+
+ss = EtatBoutique(lambda: MARCHAND_ID)
 st.session_state["_boutique_verrouillee_id"] = MARCHAND_ID
 
 
-if "admin_connecte" not in st.session_state:
-    st.session_state.admin_connecte = False
+if "admin_connecte" not in ss:
+    ss.admin_connecte = False
 
 
 # 🔒 FIX SÉCURITÉ : SHA-256 seul est un hash *rapide*, non conçu pour des
@@ -545,7 +586,7 @@ def admin_login(mot_de_passe):
     """Retourne (succes: bool, message_erreur: str | None).
     🔒 AUDIT SÉCURITÉ #3 : le verrouillage anti-brute-force vit maintenant
     côté serveur (table tentatives_connexion via RPC), plus dans
-    st.session_state -- un nouvel onglet privé ne permet plus de
+    ss -- un nouvel onglet privé ne permet plus de
     contourner la limite de tentatives. En cas d'échec de la RPC (ex:
     fonction pas encore migrée), on retombe sur l'ancien comportement en
     session plutôt que de bloquer complètement la connexion."""
@@ -559,12 +600,12 @@ def admin_login(mot_de_passe):
             return False, f"Trop de tentatives échouées. Réessaie dans {restant} seconde(s)."
     except Exception:
         logger.warning("RPC verifier_verrou_connexion indisponible, repli sur le verrou de session")
-        verrou_jusqu_a = st.session_state.get("admin_verrou_jusqu_a", 0)
+        verrou_jusqu_a = ss.get("admin_verrou_jusqu_a", 0)
         if maintenant < verrou_jusqu_a:
             restant = int(verrou_jusqu_a - maintenant)
             return False, f"Trop de tentatives échouées. Réessaie dans {restant} seconde(s)."
 
-    config_actuelle = charger_config(MARCHAND_ID, st.session_state.refresh_token)
+    config_actuelle = charger_config(MARCHAND_ID, ss.refresh_token)
     hash_attendu = config_actuelle.get("mot_de_passe", "")
     mot_de_passe_correct = verifier_mot_de_passe(mot_de_passe, hash_attendu)
 
@@ -591,40 +632,40 @@ def admin_login(mot_de_passe):
                 ).eq("id", MARCHAND_ID).execute()
             except Exception:
                 logger.exception("Échec migration hash mot de passe legacy vers bcrypt")
-        st.session_state.admin_connecte = True
-        st.session_state.admin_derniere_activite = maintenant
-        st.session_state.admin_tentatives = 0
-        st.session_state.admin_verrou_jusqu_a = 0
+        ss.admin_connecte = True
+        ss.admin_derniere_activite = maintenant
+        ss.admin_tentatives = 0
+        ss.admin_verrou_jusqu_a = 0
         return True, None
 
     # Repli local (utilisé seulement si la RPC ci-dessus a échoué) --
     # sinon le compteur en session reste à 0 et n'a aucun effet, la RPC
     # ayant déjà fait foi.
-    tentatives = st.session_state.get("admin_tentatives", 0) + 1
-    st.session_state.admin_tentatives = tentatives
+    tentatives = ss.get("admin_tentatives", 0) + 1
+    ss.admin_tentatives = tentatives
     if tentatives >= SEUIL_TENTATIVES_ADMIN:
-        st.session_state.admin_verrou_jusqu_a = maintenant + DUREE_VERROU_ADMIN_SEC
-        st.session_state.admin_tentatives = 0
+        ss.admin_verrou_jusqu_a = maintenant + DUREE_VERROU_ADMIN_SEC
+        ss.admin_tentatives = 0
         return False, f"Trop de tentatives échouées. Réessaie dans {DUREE_VERROU_ADMIN_SEC // 60} minute(s)."
     return False, "Mot de passe incorrect."
 
 
 def admin_logout():
-    st.session_state.admin_connecte = False
-    st.session_state.pop("admin_derniere_activite", None)
+    ss.admin_connecte = False
+    ss.pop("admin_derniere_activite", None)
 
 
 def session_admin_valide():
     """Vérifie que l'admin est connecté ET que sa session n'a pas expiré par
     inactivité (protège un poste laissé déverrouillé)."""
-    if not st.session_state.get("admin_connecte"):
+    if not ss.get("admin_connecte"):
         return False
     maintenant = datetime.now(timezone.utc).timestamp()
-    derniere_activite = st.session_state.get("admin_derniere_activite", 0)
+    derniere_activite = ss.get("admin_derniere_activite", 0)
     if maintenant - derniere_activite > DUREE_SESSION_ADMIN_SEC:
         admin_logout()
         return False
-    st.session_state.admin_derniere_activite = maintenant
+    ss.admin_derniere_activite = maintenant
     return True
 
 
@@ -633,10 +674,10 @@ def throttle(cle, delai_sec=10):
     stock...) -- limite la fréquence par session, en complément des
     policies RLS côté Supabase qui restent la protection de fond."""
     maintenant = datetime.now(timezone.utc).timestamp()
-    dernier = st.session_state.get(f"throttle_{cle}", 0)
+    dernier = ss.get(f"throttle_{cle}", 0)
     if maintenant - dernier < delai_sec:
         return False
-    st.session_state[f"throttle_{cle}"] = maintenant
+    ss[f"throttle_{cle}"] = maintenant
     return True
 
 
@@ -1246,7 +1287,7 @@ def generer_visuel_produit(url_image_produit, nom_produit, prix, nom_boutique, p
 
 
 # ====================== 4bis. PANIER PERSISTANT (survit à un redéploiement) ======================
-# 🔒 FIX : le panier vit normalement dans st.session_state, qui est stocké en
+# 🔒 FIX : le panier vit normalement dans ss, qui est stocké en
 # mémoire côté serveur. Or un redéploiement de l'app (ex: ajout d'un paquet
 # dans requirements.txt) redémarre le serveur et efface TOUTE la mémoire de
 # TOUTES les sessions en cours -- même chose si le client perd sa connexion
@@ -1255,27 +1296,38 @@ def generer_visuel_produit(url_image_produit, nom_produit, prix, nom_boutique, p
 # encodé dans le paramètre ?panier=... . Si le navigateur se reconnecte
 # (après un redéploiement ou une coupure réseau), l'app relit ce paramètre et
 # reconstruit le panier automatiquement, sans que le client s'en aperçoive.
+def _cle_url_boutique(nom):
+    # 🔒 Même logique de namespacing que `ss` (voir EtatBoutique) mais pour
+    # les paramètres d'URL : "panier"/"favoris" sans suffixe seraient
+    # partagés par TOUTES les boutiques dans la même URL/onglet, et
+    # réimporteraient le panier d'une boutique dans une autre au moment où
+    # ss.cart n'existe pas encore pour la nouvelle boutique.
+    return f"{nom}_m{MARCHAND_ID}"
+
+
 def synchroniser_panier_url():
     try:
-        if st.session_state.cart:
-            st.query_params["panier"] = json.dumps(st.session_state.cart, separators=(",", ":"))
-        elif "panier" in st.query_params:
-            del st.query_params["panier"]
+        cle = _cle_url_boutique("panier")
+        if ss.cart:
+            st.query_params[cle] = json.dumps(ss.cart, separators=(",", ":"))
+        elif cle in st.query_params:
+            del st.query_params[cle]
     except Exception:
         pass  # la persistance du panier est un bonus, jamais bloquant
 
 
 # ====================== 4ter. FAVORIS PERSISTANTS ======================
 # Même principe que le panier ci-dessus : la liste de favoris (identifiants
-# d'articles) vit dans st.session_state et est dupliquée dans l'URL
-# (?favoris=...) pour survivre à un redéploiement ou une coupure réseau, sans
-# nécessiter de compte client.
+# d'articles) vit dans ss et est dupliquée dans l'URL
+# (?favoris_m<id>=...) pour survivre à un redéploiement ou une coupure
+# réseau, sans nécessiter de compte client.
 def synchroniser_favoris_url():
     try:
-        if st.session_state.favoris:
-            st.query_params["favoris"] = json.dumps(st.session_state.favoris, separators=(",", ":"))
-        elif "favoris" in st.query_params:
-            del st.query_params["favoris"]
+        cle = _cle_url_boutique("favoris")
+        if ss.favoris:
+            st.query_params[cle] = json.dumps(ss.favoris, separators=(",", ":"))
+        elif cle in st.query_params:
+            del st.query_params[cle]
     except Exception:
         pass  # la persistance des favoris est un bonus, jamais bloquant
 
@@ -1532,59 +1584,59 @@ def charger_avis_moyennes(marchand_id, _refresh=0):
     }
 
 
-if "refresh_token" not in st.session_state:
-    st.session_state.refresh_token = 0
-if "cart" not in st.session_state:
-    st.session_state.cart = []
+if "refresh_token" not in ss:
+    ss.refresh_token = 0
+if "cart" not in ss:
+    ss.cart = []
     # 🔄 Tentative de restauration du panier depuis l'URL (voir
     # synchroniser_panier_url ci-dessus) -- couvre le cas d'un redéploiement
     # ou d'une reconnexion réseau pendant que le client faisait ses achats.
-    panier_url = st.query_params.get("panier")
+    panier_url = st.query_params.get(_cle_url_boutique("panier"))
     if panier_url:
         try:
             panier_restaure = json.loads(panier_url)
             if isinstance(panier_restaure, list):
-                st.session_state.cart = panier_restaure
+                ss.cart = panier_restaure
         except Exception:
             pass
-if "favoris" not in st.session_state:
-    st.session_state.favoris = []
+if "favoris" not in ss:
+    ss.favoris = []
     # 🔄 Restauration des favoris depuis l'URL (voir synchroniser_favoris_url
     # ci-dessus), même logique que pour le panier.
-    favoris_url = st.query_params.get("favoris")
+    favoris_url = st.query_params.get(_cle_url_boutique("favoris"))
     if favoris_url:
         try:
             favoris_restaures = json.loads(favoris_url)
             if isinstance(favoris_restaures, list):
-                st.session_state.favoris = favoris_restaures
+                ss.favoris = favoris_restaures
         except Exception:
             pass
-if "dernier_panier_signature" not in st.session_state:
-    st.session_state.dernier_panier_signature = None
-if "message_toast" not in st.session_state:
-    st.session_state.message_toast = None
-if "icone_toast" not in st.session_state:
-    st.session_state.icone_toast = "✅"
-if "jouer_son" not in st.session_state:
-    st.session_state.jouer_son = False
-if "acces_choisi" not in st.session_state:
-    st.session_state.acces_choisi = None
+if "dernier_panier_signature" not in ss:
+    ss.dernier_panier_signature = None
+if "message_toast" not in ss:
+    ss.message_toast = None
+if "icone_toast" not in ss:
+    ss.icone_toast = "✅"
+if "jouer_son" not in ss:
+    ss.jouer_son = False
+if "acces_choisi" not in ss:
+    ss.acces_choisi = None
 
 # 🔔 st.toast() et le son ne s'affichaient jamais : ils étaient déclenchés
 # juste avant st.rerun(), qui interrompt le script et jette l'écran en cours
 # avant que le navigateur n'ait eu le temps de les afficher/jouer. On les
 # stocke donc dans la session et on les affiche ici, tout en haut du script,
 # une fois que le rerun est terminé et que la nouvelle page est stable.
-if st.session_state.message_toast:
-    st.toast(st.session_state.message_toast, icon=st.session_state.icone_toast)
-    st.session_state.message_toast = None
-if st.session_state.jouer_son:
+if ss.message_toast:
+    st.toast(ss.message_toast, icon=ss.icone_toast)
+    ss.message_toast = None
+if ss.jouer_son:
     jouer_son_ajout()
-    st.session_state.jouer_son = False
+    ss.jouer_son = False
 
 
 def forcer_rafraichissement():
-    st.session_state.refresh_token += 1
+    ss.refresh_token += 1
     charger_catalogue.clear()
     charger_config.clear()
     charger_avis_moyennes.clear()
@@ -1602,7 +1654,7 @@ def sauvegarder_panier_abandonne(tel, nom, articles):
         return
     total = sum(a["prix"] * a["quantite"] for a in articles)
     signature = (tel, nom, tuple((a["nom"], a["quantite"]) for a in articles), total)
-    if st.session_state.dernier_panier_signature == signature:
+    if ss.dernier_panier_signature == signature:
         return  # rien de changé depuis la dernière sauvegarde, on évite une écriture inutile
 
     # 🐛 CORRECTIF : passait avant par sb.table(...).insert/update() avec la
@@ -1619,7 +1671,7 @@ def sauvegarder_panier_abandonne(tel, nom, articles):
             "p_total": total,
             "p_marchand_id": MARCHAND_ID
         }).execute()
-        st.session_state.dernier_panier_signature = signature
+        ss.dernier_panier_signature = signature
     except Exception:
         pass  # la sauvegarde du panier abandonné est un bonus, jamais bloquant
 
@@ -1639,7 +1691,7 @@ def marquer_panier_converti(tel):
 
 # ====================== 6. EMAIL (Gmail SMTP, avec repli journalisé) ======================
 def envoyer_notification_commande(id_commande, client_nom, tel, articles, total, introuvables):
-    nom_boutique_actuel = charger_config(MARCHAND_ID, st.session_state.refresh_token).get(
+    nom_boutique_actuel = charger_config(MARCHAND_ID, ss.refresh_token).get(
         "nom_boutique", "notre boutique"
     )
     corps = f"Nouvelle commande reçue sur {nom_boutique_actuel} !\n\n"
@@ -1654,7 +1706,7 @@ def envoyer_notification_commande(id_commande, client_nom, tel, articles, total,
     envoye = False
     if EMAIL_ACTIVE:
         try:
-            config = charger_config(MARCHAND_ID, st.session_state.refresh_token)
+            config = charger_config(MARCHAND_ID, ss.refresh_token)
             destinataire = config.get("email_admin") or st.secrets["GMAIL_ADDRESS"]
             msg = MIMEText(corps, "plain", "utf-8")
             msg["Subject"] = f"Nouvelle commande — {total} FCFA"
@@ -1718,7 +1770,7 @@ def notifier_retour_stock(nom_article):
         )
     except Exception:
         return
-    nom_boutique_actuel = charger_config(MARCHAND_ID, st.session_state.refresh_token).get("nom_boutique", "notre boutique")
+    nom_boutique_actuel = charger_config(MARCHAND_ID, ss.refresh_token).get("nom_boutique", "notre boutique")
     for alerte in (reponse.data or []):
         if alerte.get("contact_type") == "email":
             nom_client_alerte = (alerte.get("nom_client") or "").strip()
@@ -1808,10 +1860,10 @@ def verifier_bilan_quotidien(config):
 
 
 # ====================== 7. INTERFACE PUBLIQUE ======================
-config = charger_config(MARCHAND_ID, st.session_state.refresh_token)
-df_catalogue = charger_catalogue(MARCHAND_ID, st.session_state.refresh_token)
-avis_moyennes = charger_avis_moyennes(MARCHAND_ID, st.session_state.refresh_token)
-avis_par_article = indexer_avis_par_article(charger_tous_avis_approuves(MARCHAND_ID, st.session_state.refresh_token))
+config = charger_config(MARCHAND_ID, ss.refresh_token)
+df_catalogue = charger_catalogue(MARCHAND_ID, ss.refresh_token)
+avis_moyennes = charger_avis_moyennes(MARCHAND_ID, ss.refresh_token)
+avis_par_article = indexer_avis_par_article(charger_tous_avis_approuves(MARCHAND_ID, ss.refresh_token))
 
 # 🔔 Vérifications silencieuses (n'affichent rien, ne bloquent jamais la
 # page) -- envoient au plus un email par jour chacune, dès que quelqu'un
@@ -1837,7 +1889,7 @@ mode_admin = st.query_params.get("admin") == "1"
 # 🔀 Si un visiteur arrivé sur l'URL secrète ?admin=1 a choisi "client" sur
 # l'écran d'accueil ci-dessous, on le renvoie directement vers la boutique
 # (sans avoir à retirer le paramètre d'URL).
-if mode_admin and not st.session_state.admin_connecte and st.session_state.acces_choisi == "client":
+if mode_admin and not ss.admin_connecte and ss.acces_choisi == "client":
     mode_admin = False
 
 if not mode_admin:
@@ -1889,8 +1941,8 @@ if not mode_admin:
             # articles qu'il a marqués comme favoris, sans avoir à les
             # rechercher dans tout le catalogue.
             favoris_uniquement = st.checkbox(
-                f"❤️ Afficher uniquement mes favoris ({len(st.session_state.favoris)})",
-                disabled=not st.session_state.favoris
+                f"❤️ Afficher uniquement mes favoris ({len(ss.favoris)})",
+                disabled=not ss.favoris
             )
 
             df_affiche = df_catalogue.copy()
@@ -1901,7 +1953,7 @@ if not mode_admin:
             if favoris_uniquement:
                 df_affiche = df_affiche[
                     df_affiche.apply(
-                        lambda r: normaliser(r.get("id") or r.get("nom")) in st.session_state.favoris,
+                        lambda r: normaliser(r.get("id") or r.get("nom")) in ss.favoris,
                         axis=1
                     )
                 ]
@@ -1911,7 +1963,7 @@ if not mode_admin:
             # sans aucune action du marchand.
             if boutique_premium(config):
                 collections_dispo = collections_actives_non_expirees(
-                    charger_collections(MARCHAND_ID, st.session_state.refresh_token)
+                    charger_collections(MARCHAND_ID, ss.refresh_token)
                 )
                 if collections_dispo:
                     noms_collections = {c["nom"]: c["id"] for c in collections_dispo}
@@ -1980,15 +2032,15 @@ if not mode_admin:
                     # que le client puisse quand même sauvegarder l'article et
                     # le retrouver facilement plus tard (voir le filtre
                     # "Afficher uniquement mes favoris" au-dessus de la grille).
-                    est_favori = identifiant_produit in st.session_state.favoris
+                    est_favori = identifiant_produit in ss.favoris
                     if st.button(
                         "❤️ Retirer des favoris" if est_favori else "🤍 Ajouter aux favoris",
                         key=f"favori_{idx}"
                     ):
                         if est_favori:
-                            st.session_state.favoris.remove(identifiant_produit)
+                            ss.favoris.remove(identifiant_produit)
                         else:
-                            st.session_state.favoris.append(identifiant_produit)
+                            ss.favoris.append(identifiant_produit)
                         synchroniser_favoris_url()
                         st.rerun()
 
@@ -2035,7 +2087,7 @@ if not mode_admin:
                         with col_panier:
                             if st.button("🛒 Ajouter au panier", key=f"add_{idx}"):
                                 existant = next(
-                                    (a for a in st.session_state.cart
+                                    (a for a in ss.cart
                                      if a["nom"] == row["nom"] and a.get("taille") == taille_choisie
                                      and a.get("couleur") == couleur_choisie),
                                     None
@@ -2043,7 +2095,7 @@ if not mode_admin:
                                 if existant:
                                     existant["quantite"] += 1
                                 else:
-                                    st.session_state.cart.append({
+                                    ss.cart.append({
                                         "produit_id": str(row.get("id") or ""),
                                         "nom": row["nom"],
                                         "prix": float(prix_promo if en_promo else prix),
@@ -2051,9 +2103,9 @@ if not mode_admin:
                                         "couleur": couleur_choisie,
                                         "quantite": 1
                                     })
-                                st.session_state.message_toast = f"{nom_affiche} ajouté au panier !"
-                                st.session_state.icone_toast = "🛍️"
-                                st.session_state.jouer_son = True
+                                ss.message_toast = f"{nom_affiche} ajouté au panier !"
+                                ss.icone_toast = "🛍️"
+                                ss.jouer_son = True
                                 synchroniser_panier_url()
                                 st.rerun()
                         with col_partager:
@@ -2156,18 +2208,18 @@ if not mode_admin:
 
         with st.container(border=True):
             entete_panneau_sidebar("🛒", "Panier", "Commande en cours")
-            if not st.session_state.cart:
+            if not ss.cart:
                 st.caption("Panier vide")
             else:
                 total_panier = 0
-                for i, item in enumerate(st.session_state.cart):
+                for i, item in enumerate(ss.cart):
                     sous_total = item["prix"] * item["quantite"]
                     total_panier += sous_total
                     variante = " / ".join(v for v in [item.get("taille"), item.get("couleur")] if v)
                     label = f"{item['nom']} ({variante})" if variante else item["nom"]
                     st.write(f"{label} × {item['quantite']} = {int(sous_total)} FCFA")
                     if st.button("🗑️", key=f"suppr_{i}"):
-                        st.session_state.cart.pop(i)
+                        ss.cart.pop(i)
                         synchroniser_panier_url()
                         st.rerun()
 
@@ -2180,7 +2232,7 @@ if not mode_admin:
                 client_tel = st.text_input("Votre téléphone", key="checkout_tel")
 
                 if client_tel.strip():
-                    sauvegarder_panier_abandonne(client_tel, client_nom, st.session_state.cart)
+                    sauvegarder_panier_abandonne(client_tel, client_nom, ss.cart)
 
                 if st.button("✅ Confirmer la commande"):
                     if not client_nom.strip() or not client_tel.strip():
@@ -2188,7 +2240,7 @@ if not mode_admin:
                     else:
                         articles_payload = [
                             {"produit_id": a["produit_id"], "nom": a["nom"], "quantite": a["quantite"]}
-                            for a in st.session_state.cart
+                            for a in ss.cart
                         ]
                         resultat = sb.rpc("passer_commande", {
                             "p_client_nom": client_nom.strip(),
@@ -2220,8 +2272,8 @@ if not mode_admin:
                             lien_whatsapp = f"https://wa.me/{WHATSAPP}?text={requests.utils.quote(message_whatsapp)}"
                             st.link_button("💬 Confirmer aussi sur WhatsApp", lien_whatsapp)
 
-                        st.session_state.cart = []
-                        st.session_state.dernier_panier_signature = None
+                        ss.cart = []
+                        ss.dernier_panier_signature = None
                         synchroniser_panier_url()
                         forcer_rafraichissement()
                         st.success(f"Commande {donnee.get('id_commande')} enregistrée ! Total : {int(donnee.get('total', 0))} FCFA")
@@ -2233,12 +2285,12 @@ if not mode_admin:
         # sans avoir à refaire défiler tout le catalogue.
         with st.container(border=True):
             entete_panneau_sidebar("❤️", "Mes favoris", "Sélection")
-            if not st.session_state.favoris:
+            if not ss.favoris:
                 st.caption("Aucun favori pour le moment.")
             else:
                 articles_favoris = df_catalogue[
                     df_catalogue.apply(
-                        lambda r: normaliser(r.get("id") or r.get("nom")) in st.session_state.favoris,
+                        lambda r: normaliser(r.get("id") or r.get("nom")) in ss.favoris,
                         axis=1
                     )
                 ]
@@ -2247,7 +2299,7 @@ if not mode_admin:
                     col_nom_favori, col_suppr_favori = st.columns([3, 1])
                     col_nom_favori.write(f"❤️ {art_favori['nom']} — {int(art_favori.get('prix') or 0)} FCFA")
                     if col_suppr_favori.button("🗑️", key=f"suppr_favori_{id_favori}"):
-                        st.session_state.favoris.remove(id_favori)
+                        ss.favoris.remove(id_favori)
                         synchroniser_favoris_url()
                         st.rerun()
 
@@ -2272,7 +2324,7 @@ if not mode_admin:
                         st.warning("Un code a déjà été demandé récemment pour ce numéro, patiente un peu.")
                     else:
                         code = f"{secrets.randbelow(1_000_000):06d}"
-                        st.session_state["otp_suivi"] = {
+                        ss["otp_suivi"] = {
                             "tel": tel_normalise, "code": code,
                             "expire": datetime.now(timezone.utc).timestamp() + 300
                         }
@@ -2281,13 +2333,13 @@ if not mode_admin:
                         st.info("Clique ci-dessous pour recevoir ton code sur WhatsApp, puis reviens le saisir ici.")
                         st.link_button("💬 Recevoir le code sur WhatsApp", lien_otp)
 
-                otp_en_cours = st.session_state.get("otp_suivi")
+                otp_en_cours = ss.get("otp_suivi")
                 if otp_en_cours:
                     code_saisi = st.text_input("Code reçu par WhatsApp", key="code_suivi")
                     if st.button("Valider et voir mes commandes", key="btn_suivi_valider"):
                         if datetime.now(timezone.utc).timestamp() > otp_en_cours["expire"]:
                             st.error("Code expiré, redemande un code.")
-                            st.session_state.pop("otp_suivi", None)
+                            ss.pop("otp_suivi", None)
                         elif not hmac.compare_digest(code_saisi.strip(), otp_en_cours["code"]):
                             st.error("Code incorrect.")
                         else:
@@ -2317,18 +2369,18 @@ if not mode_admin:
 
 # ====================== 8. ADMIN ======================
 else:
-    if not st.session_state.admin_connecte:
-        if st.session_state.acces_choisi != "admin":
+    if not ss.admin_connecte:
+        if ss.acces_choisi != "admin":
             # ---- Écran d'accueil : logo + effet lumineux doré + message de bienvenue ----
             afficher_hero(LOGO_SUR, f"Bienvenue chez {NOM_BOUTIQUE}", "Comment souhaitez-vous continuer ?")
             col_client, col_admin = st.columns(2)
             with col_client:
                 if st.button("🛍️ Je suis client / visiteur", use_container_width=True):
-                    st.session_state.acces_choisi = "client"
+                    ss.acces_choisi = "client"
                     st.rerun()
             with col_admin:
                 if st.button("🔐 Je suis administrateur", use_container_width=True):
-                    st.session_state.acces_choisi = "admin"
+                    ss.acces_choisi = "admin"
                     st.rerun()
         else:
             # ---- Écran de connexion admin (mot de passe) ----
@@ -2349,18 +2401,18 @@ else:
                         st.error("Échec de connexion. Réessaie dans quelques instants.")
             with col_retour:
                 if st.button("↩️ Retour"):
-                    st.session_state.acces_choisi = None
+                    ss.acces_choisi = None
                     st.rerun()
     elif not session_admin_valide():
         st.warning("Session admin expirée par inactivité. Merci de te reconnecter.")
-        st.session_state.acces_choisi = None
+        ss.acces_choisi = None
         st.rerun()
     else:
         sb_admin = get_admin_client()
         st.success("Connecté en tant qu'admin")
         if st.button("Se déconnecter"):
             admin_logout()
-            st.session_state.acces_choisi = None
+            ss.acces_choisi = None
             st.rerun()
 
         (tab_catalogue, tab_promos, tab_commandes, tab_avis, tab_stats,
@@ -2377,10 +2429,10 @@ else:
             # l'article était quand même enregistré SANS photo, sans que le
             # marchand ait pu lire pourquoi. Le message est maintenant
             # conservé ici tant qu'il n'a pas été explicitement fermé.
-            if st.session_state.get("alerte_upload_catalogue"):
-                st.error(st.session_state["alerte_upload_catalogue"])
+            if ss.get("alerte_upload_catalogue"):
+                st.error(ss["alerte_upload_catalogue"])
                 if st.button("OK, compris", key="fermer_alerte_upload_catalogue"):
-                    del st.session_state["alerte_upload_catalogue"]
+                    del ss["alerte_upload_catalogue"]
                     st.rerun()
 
             st.write("### Articles existants")
@@ -2424,13 +2476,13 @@ else:
 
                         st.caption("Image principale")
                         contenu_principale, _nom = uploader_image_compressee(
-                            key=f"img_{cle_unique}_{st.session_state.refresh_token}"
+                            key=f"img_{cle_unique}_{ss.refresh_token}"
                         )
                         st.caption("Images supplémentaires (jusqu'à 3, une à la fois)")
                         contenus_supp = []
                         for i in range(3):
                             contenu_supp, _nom_supp = uploader_image_compressee(
-                                key=f"imgs_{cle_unique}_{i}_{st.session_state.refresh_token}"
+                                key=f"imgs_{cle_unique}_{i}_{ss.refresh_token}"
                             )
                             if contenu_supp:
                                 contenus_supp.append(contenu_supp)
@@ -2463,12 +2515,12 @@ else:
                                 notifier_retour_stock(nouveau_nom)
                             forcer_rafraichissement()
                             if erreurs_images_edit:
-                                st.session_state["alerte_upload_catalogue"] = (
+                                ss["alerte_upload_catalogue"] = (
                                     "⚠️ « " + nouveau_nom + " » a été mis à jour, mais l'envoi de photo a échoué : "
                                     + " ; ".join(erreurs_images_edit) + ". Le reste a bien été enregistré."
                                 )
                             else:
-                                st.session_state.pop("alerte_upload_catalogue", None)
+                                ss.pop("alerte_upload_catalogue", None)
                                 st.success("Article mis à jour")
                             st.rerun()
                     if not id_manquant and st.button("🗑️ Supprimer", key=f"del_{cle_unique}"):
@@ -2486,12 +2538,12 @@ else:
                 couleurs = st.text_input("Couleurs (séparées par virgule)")
                 st.caption("Image principale")
                 contenu_principale, _nom = uploader_image_compressee(
-                    key=f"ajout_img_principale_{st.session_state.refresh_token}"
+                    key=f"ajout_img_principale_{ss.refresh_token}"
                 )
                 st.caption("Images supplémentaires (facultatif, jusqu'à 3, une à la fois)")
                 contenus_supp = []
                 for i in range(3):
-                    c, _n = uploader_image_compressee(key=f"ajout_img_supp_{i}_{st.session_state.refresh_token}")
+                    c, _n = uploader_image_compressee(key=f"ajout_img_supp_{i}_{ss.refresh_token}")
                     if c:
                         contenus_supp.append(c)
                 if st.form_submit_button("Ajouter"):
@@ -2521,13 +2573,13 @@ else:
                         }).execute()
                         forcer_rafraichissement()
                         if erreurs_images:
-                            st.session_state["alerte_upload_catalogue"] = (
+                            ss["alerte_upload_catalogue"] = (
                                 "⚠️ « " + nom + " » a été ajouté, mais SANS photo -- l'envoi a échoué : "
                                 + " ; ".join(erreurs_images)
                                 + ". Ouvre l'article ci-dessus pour réessayer d'ajouter la photo."
                             )
                         else:
-                            st.session_state.pop("alerte_upload_catalogue", None)
+                            ss.pop("alerte_upload_catalogue", None)
                             st.success("Article ajouté")
                         st.rerun()
 
@@ -2689,12 +2741,12 @@ else:
                         # automatique possible sans API WhatsApp Business, donc
                         # on prépare le message et on laisse un clic l'envoyer,
                         # même mécanisme que les autres relances de l'app.
-                        st.session_state[f"notif_statut_{cle_unique}"] = nouveau_statut
+                        ss[f"notif_statut_{cle_unique}"] = nouveau_statut
                         st.rerun()
 
-                    if st.session_state.get(f"notif_statut_{cle_unique}"):
+                    if ss.get(f"notif_statut_{cle_unique}"):
                         tel_client_cmd = re.sub(r"\D", "", str(cmd.get("tel") or ""))
-                        statut_envoye = st.session_state[f"notif_statut_{cle_unique}"]
+                        statut_envoye = ss[f"notif_statut_{cle_unique}"]
                         messages_par_statut = {
                             "En cours": f"Bonjour {cmd.get('client_nom') or ''}, votre commande chez {config.get('nom_boutique', 'notre boutique')} est en cours de préparation. Nous vous tiendrons informé(e) !",
                             "Confirmée": f"Bonjour {cmd.get('client_nom') or ''}, bonne nouvelle : votre commande chez {config.get('nom_boutique', 'notre boutique')} est confirmée !",
@@ -2873,7 +2925,7 @@ else:
                 else:
                     st.caption("Aucun logo pour le moment.")
                 nouveau_logo_contenu, _nom_logo = uploader_image_compressee(
-                    key=f"upload_logo_{st.session_state.refresh_token}"
+                    key=f"upload_logo_{ss.refresh_token}"
                 )
 
                 if st.form_submit_button("✅ Valider le nom, le slogan et le logo"):
@@ -3046,12 +3098,12 @@ else:
                             if erreur_relance:
                                 st.error(f"❌ {erreur_relance}")
                             else:
-                                st.session_state[cle_message_ia] = texte_relance
+                                ss[cle_message_ia] = texte_relance
 
-                        if st.session_state.get(cle_message_ia):
+                        if ss.get(cle_message_ia):
                             message_relance_defaut = st.text_area(
                                 "Message de relance (modifiable)",
-                                value=st.session_state[cle_message_ia],
+                                value=ss[cle_message_ia],
                                 key=f"texte_{cle_message_ia}",
                                 height=100,
                             )
@@ -3144,13 +3196,13 @@ else:
                                     for ligne in texte_banniere_ia.splitlines():
                                         ligne_maj = ligne.strip().upper()
                                         if ligne_maj.startswith("TITRE:"):
-                                            st.session_state["banniere_titre_genere"] = ligne.split(":", 1)[1].strip()
+                                            ss["banniere_titre_genere"] = ligne.split(":", 1)[1].strip()
                                         elif ligne_maj.startswith("TEXTE:"):
-                                            st.session_state["banniere_texte_genere"] = ligne.split(":", 1)[1].strip()
+                                            ss["banniere_texte_genere"] = ligne.split(":", 1)[1].strip()
                                         elif ligne_maj.startswith("CODE:"):
                                             valeur_code = ligne.split(":", 1)[1].strip()
                                             if valeur_code and valeur_code.upper() != "VIDE":
-                                                st.session_state["banniere_code_genere"] = valeur_code
+                                                ss["banniere_code_genere"] = valeur_code
                                     st.success("Généré ! Vérifie et ajuste ci-dessous avant d'enregistrer.")
                                     st.rerun()
 
@@ -3161,17 +3213,17 @@ else:
                         )
                         banniere_titre_input = st.text_input(
                             "Titre",
-                            value=st.session_state.get("banniere_titre_genere") or config.get("banniere_titre") or "",
+                            value=ss.get("banniere_titre_genere") or config.get("banniere_titre") or "",
                             placeholder="Ex : Soldes de fin d'année"
                         )
                         banniere_texte_input = st.text_area(
                             "Texte",
-                            value=st.session_state.get("banniere_texte_genere") or config.get("banniere_texte") or "",
+                            value=ss.get("banniere_texte_genere") or config.get("banniere_texte") or "",
                             placeholder="Ex : -20% sur toute la collection jusqu'au 31 décembre"
                         )
                         banniere_code_input = st.text_input(
                             "Code promo (facultatif)",
-                            value=st.session_state.get("banniere_code_genere") or config.get("banniere_code_promo") or "",
+                            value=ss.get("banniere_code_genere") or config.get("banniere_code_promo") or "",
                             placeholder="Ex : NOEL20"
                         )
                         banniere_style_input = st.radio(
@@ -3198,7 +3250,7 @@ else:
                                     st.error("❌ L'enregistrement a échoué. Réessaie dans un instant.")
                                 else:
                                     for cle_generee in ("banniere_titre_genere", "banniere_texte_genere", "banniere_code_genere"):
-                                        st.session_state.pop(cle_generee, None)
+                                        ss.pop(cle_generee, None)
                                     forcer_rafraichissement()
                                     st.success("Bannière mise à jour.")
                                     st.rerun()
@@ -3236,12 +3288,12 @@ else:
                                 if erreur_accroche:
                                     st.error(f"❌ {erreur_accroche}")
                                 else:
-                                    st.session_state["accroche_visuel_generee"] = accroche_generee.strip().strip('"')
+                                    ss["accroche_visuel_generee"] = accroche_generee.strip().strip('"')
                                     st.rerun()
 
                         accroche_visuel = st.text_input(
                             "Accroche affichée sur le visuel (facultatif)",
-                            value=st.session_state.get("accroche_visuel_generee", ""),
+                            value=ss.get("accroche_visuel_generee", ""),
                             key="accroche_visuel_input",
                             placeholder="Ex : NOUVELLE COLLECTION"
                         )
@@ -3302,12 +3354,12 @@ else:
                             if erreur_ia:
                                 st.error(f"❌ {erreur_ia}")
                             else:
-                                st.session_state["ia_description_generee"] = texte_genere
+                                ss["ia_description_generee"] = texte_genere
 
-                        if st.session_state.get("ia_description_generee"):
+                        if ss.get("ia_description_generee"):
                             description_finale = st.text_area(
                                 "Description générée (modifiable avant enregistrement)",
-                                value=st.session_state["ia_description_generee"],
+                                value=ss["ia_description_generee"],
                                 key="ia_description_editable",
                                 height=120,
                             )
@@ -3325,7 +3377,7 @@ else:
                                 else:
                                     forcer_rafraichissement()
                                     st.success("Description enregistrée sur la fiche produit.")
-                                    del st.session_state["ia_description_generee"]
+                                    del ss["ia_description_generee"]
                                     st.rerun()
 
                         st.divider()
@@ -3360,12 +3412,12 @@ else:
                             if erreur_post:
                                 st.error(f"❌ {erreur_post}")
                             else:
-                                st.session_state["ia_post_genere"] = texte_post
+                                ss["ia_post_genere"] = texte_post
 
-                        if st.session_state.get("ia_post_genere"):
+                        if ss.get("ia_post_genere"):
                             texte_post_genere = st.text_area(
                                 "Post généré (copie-colle sur tes réseaux)",
-                                value=st.session_state["ia_post_genere"],
+                                value=ss["ia_post_genere"],
                                 key="ia_post_editable",
                                 height=160,
                             )
@@ -3420,12 +3472,12 @@ else:
                                 if erreur_tunnel:
                                     st.error(f"❌ {erreur_tunnel}")
                                 else:
-                                    st.session_state["ia_tunnel_genere"] = texte_tunnel
+                                    ss["ia_tunnel_genere"] = texte_tunnel
 
-                        if st.session_state.get("ia_tunnel_genere"):
+                        if ss.get("ia_tunnel_genere"):
                             st.text_area(
                                 "Tunnel généré (copie-colle chaque message au bon moment)",
-                                value=st.session_state["ia_tunnel_genere"],
+                                value=ss["ia_tunnel_genere"],
                                 key="ia_tunnel_editable",
                                 height=260,
                             )
@@ -3457,12 +3509,12 @@ else:
                             if erreur_pack:
                                 st.error(f"❌ {erreur_pack}")
                             else:
-                                st.session_state["ia_pack_genere"] = texte_pack
+                                ss["ia_pack_genere"] = texte_pack
 
-                        if st.session_state.get("ia_pack_genere"):
+                        if ss.get("ia_pack_genere"):
                             st.text_area(
                                 "Suggestion de pack (vérifie la cohérence avant de créer la collection)",
-                                value=st.session_state["ia_pack_genere"],
+                                value=ss["ia_pack_genere"],
                                 key="ia_pack_editable",
                                 height=140,
                             )
@@ -3486,12 +3538,12 @@ else:
                             if erreur_calendrier:
                                 st.error(f"❌ {erreur_calendrier}")
                             else:
-                                st.session_state["ia_calendrier_genere"] = texte_calendrier
+                                ss["ia_calendrier_genere"] = texte_calendrier
 
-                        if st.session_state.get("ia_calendrier_genere"):
+                        if ss.get("ia_calendrier_genere"):
                             st.text_area(
                                 "Calendrier généré",
-                                value=st.session_state["ia_calendrier_genere"],
+                                value=ss["ia_calendrier_genere"],
                                 key="ia_calendrier_editable",
                                 height=400,
                             )
@@ -3537,12 +3589,12 @@ else:
                                     if erreur_offre:
                                         st.error(f"❌ {erreur_offre}")
                                     else:
-                                        st.session_state["ia_offre_genere"] = texte_offre
+                                        ss["ia_offre_genere"] = texte_offre
 
-                        if st.session_state.get("ia_offre_genere"):
+                        if ss.get("ia_offre_genere"):
                             st.text_area(
                                 "Offre personnalisée générée",
-                                value=st.session_state["ia_offre_genere"],
+                                value=ss["ia_offre_genere"],
                                 key="ia_offre_editable",
                                 height=120,
                             )
@@ -3626,7 +3678,7 @@ else:
                                     st.success("Collection créée.")
                                     st.rerun()
 
-                    collections_du_marchand = charger_collections(MARCHAND_ID, st.session_state.refresh_token)
+                    collections_du_marchand = charger_collections(MARCHAND_ID, ss.refresh_token)
                     if collections_du_marchand:
                         st.markdown("##### Tes collections")
                         for coll in collections_du_marchand:
