@@ -2302,30 +2302,31 @@ if not mode_admin:
                         with st.expander("📝 Description"):
                             st.write(str(row["description"]))
 
-                    # ❤️ Favoris -- disponible même en rupture de stock, pour
-                    # que le client puisse quand même sauvegarder l'article et
-                    # le retrouver facilement plus tard (voir le filtre
-                    # "Afficher uniquement mes favoris" au-dessus de la grille).
-                    est_favori = identifiant_produit in ss.favoris
-                    if st.button(
-                        "❤️ Retirer des favoris" if est_favori else "🤍 Ajouter aux favoris",
-                        key=f"favori_{idx}"
-                    ):
-                        if est_favori:
-                            ss.favoris.remove(identifiant_produit)
-                        else:
-                            ss.favoris.append(identifiant_produit)
-                        synchroniser_favoris_url()
-                        st.rerun()
+                    # 🎨 Fiche produit épurée : favoris + stock + achat regroupés
+                    # dans une seule fenêtre dépliante au lieu de s'empiler en
+                    # boutons bruts sous le prix -- rend la grille beaucoup
+                    # plus lisible sur mobile (moins de défilement par carte).
+                    with st.expander("🛍️ Détails & achat", expanded=not en_rupture):
+                        est_favori = identifiant_produit in ss.favoris
+                        if st.button(
+                            "❤️ Retirer des favoris" if est_favori else "🤍 Ajouter aux favoris",
+                            key=f"favori_{idx}"
+                        ):
+                            if est_favori:
+                                ss.favoris.remove(identifiant_produit)
+                            else:
+                                ss.favoris.append(identifiant_produit)
+                            synchroniser_favoris_url()
+                            st.rerun()
 
-                    if en_rupture:
-                        st.error("Rupture de stock")
-                        bouton_partager(
-                            str(row["nom"]),
-                            f"Découvre {row['nom']} chez {NOM_BOUTIQUE}",
-                            MARCHAND_SLUG, identifiant_produit, cle=f"partage_{idx}"
-                        )
-                        with st.expander("🔔 Me prévenir quand disponible"):
+                        if en_rupture:
+                            st.error("Rupture de stock")
+                            bouton_partager(
+                                str(row["nom"]),
+                                f"Découvre {row['nom']} chez {NOM_BOUTIQUE}",
+                                MARCHAND_SLUG, identifiant_produit, cle=f"partage_{idx}"
+                            )
+                            st.caption("🔔 Me prévenir quand disponible")
                             nom_alerte = st.text_input("Votre nom", key=f"alerte_nom_{idx}")
                             contact = st.text_input("Email ou téléphone", key=f"alerte_{idx}")
                             if st.button("M'alerter", key=f"btn_alerte_{idx}"):
@@ -2351,46 +2352,46 @@ if not mode_admin:
                                         st.success("Inscription enregistrée !")
                                     except Exception:
                                         st.error("Une erreur est survenue, merci de réessayer.")
-                    else:
-                        if 0 < stock <= seuil_urgence_stock:
-                            st.warning(f"⚡ Il ne reste que {stock} en stock !")
-                        options_taille = [t.strip() for t in str(row.get("tailles") or "").split(",") if t.strip()]
-                        options_couleur = [c.strip() for c in str(row.get("couleurs") or "").split(",") if c.strip()]
-                        taille_choisie = st.selectbox("Taille", options_taille, key=f"taille_{idx}") if options_taille else ""
-                        couleur_choisie = st.selectbox("Couleur", options_couleur, key=f"couleur_{idx}") if options_couleur else ""
+                        else:
+                            if 0 < stock <= seuil_urgence_stock:
+                                st.warning(f"⚡ Il ne reste que {stock} en stock !")
+                            options_taille = [t.strip() for t in str(row.get("tailles") or "").split(",") if t.strip()]
+                            options_couleur = [c.strip() for c in str(row.get("couleurs") or "").split(",") if c.strip()]
+                            taille_choisie = st.selectbox("Taille", options_taille, key=f"taille_{idx}") if options_taille else ""
+                            couleur_choisie = st.selectbox("Couleur", options_couleur, key=f"couleur_{idx}") if options_couleur else ""
 
-                        col_panier, col_partager = st.columns([3, 1])
-                        with col_panier:
-                            if st.button("🛒 Ajouter au panier", key=f"add_{idx}"):
-                                existant = next(
-                                    (a for a in ss.cart
-                                     if a["nom"] == row["nom"] and a.get("taille") == taille_choisie
-                                     and a.get("couleur") == couleur_choisie),
-                                    None
+                            col_panier, col_partager = st.columns([3, 1])
+                            with col_panier:
+                                if st.button("🛒 Ajouter au panier", key=f"add_{idx}"):
+                                    existant = next(
+                                        (a for a in ss.cart
+                                         if a["nom"] == row["nom"] and a.get("taille") == taille_choisie
+                                         and a.get("couleur") == couleur_choisie),
+                                        None
+                                    )
+                                    if existant:
+                                        existant["quantite"] += 1
+                                    else:
+                                        ss.cart.append({
+                                            "produit_id": str(row.get("id") or ""),
+                                            "nom": row["nom"],
+                                            "prix": float(prix_promo if en_promo else prix),
+                                            "taille": taille_choisie,
+                                            "couleur": couleur_choisie,
+                                            "quantite": 1
+                                        })
+                                    ss.message_toast = f"{nom_affiche} ajouté au panier !"
+                                    ss.icone_toast = "🛍️"
+                                    ss.jouer_son = True
+                                    synchroniser_panier_url()
+                                    st.rerun()
+                            with col_partager:
+                                bouton_partager(
+                                    str(row["nom"]),
+                                    f"Découvre {row['nom']} chez {NOM_BOUTIQUE} — "
+                                    f"{int(prix_promo if en_promo else prix)} FCFA",
+                                    MARCHAND_SLUG, identifiant_produit, cle=f"partage_{idx}"
                                 )
-                                if existant:
-                                    existant["quantite"] += 1
-                                else:
-                                    ss.cart.append({
-                                        "produit_id": str(row.get("id") or ""),
-                                        "nom": row["nom"],
-                                        "prix": float(prix_promo if en_promo else prix),
-                                        "taille": taille_choisie,
-                                        "couleur": couleur_choisie,
-                                        "quantite": 1
-                                    })
-                                ss.message_toast = f"{nom_affiche} ajouté au panier !"
-                                ss.icone_toast = "🛍️"
-                                ss.jouer_son = True
-                                synchroniser_panier_url()
-                                st.rerun()
-                        with col_partager:
-                            bouton_partager(
-                                str(row["nom"]),
-                                f"Découvre {row['nom']} chez {NOM_BOUTIQUE} — "
-                                f"{int(prix_promo if en_promo else prix)} FCFA",
-                                MARCHAND_SLUG, identifiant_produit, cle=f"partage_{idx}"
-                            )
 
                     with st.expander("💬 Avis clients"):
                         for avis_item in avis_par_article.get(identifiant_produit, [])[:20]:
