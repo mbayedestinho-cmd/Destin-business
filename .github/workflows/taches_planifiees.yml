@@ -1,0 +1,30 @@
+name: Tâches planifiées (relance panier & fidélité)
+
+on:
+  schedule:
+    # Toutes les heures -- ajuste si le délai de relance le plus court
+    # configuré par un marchand est plus fin que ça.
+    - cron: "0 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  relances:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installer les dépendances
+        run: pip install supabase
+
+      - name: Lancer les relances automatiques
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          APP_URL: ${{ secrets.APP_URL }}
+        run: python scripts/taches_planifiees.py
