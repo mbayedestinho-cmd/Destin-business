@@ -405,7 +405,18 @@ sb = get_public_client()
 def determiner_slug_boutique():
     slug_url = st.query_params.get("boutique")
     if slug_url:
+        # On mémorise le slug en session dès qu'on le connaît, pour pouvoir
+        # le restaurer si le paramètre d'URL venait à disparaître (retour
+        # navigateur, lien/raccourci sans query string, rechargement...).
+        st.session_state["boutique_slug"] = slug_url
         return slug_url
+    slug_session = st.session_state.get("boutique_slug")
+    if slug_session:
+        # Paramètre absent CETTE fois-ci, mais cette session sait déjà à
+        # quelle boutique elle appartient -> on la restaure, et on remet le
+        # paramètre dans l'URL pour rester cohérent au prochain partage/refresh.
+        st.query_params["boutique"] = slug_session
+        return slug_session
     return st.secrets.get("MARCHAND_SLUG", "destiny-luxury")
 
 
@@ -445,6 +456,38 @@ if MARCHAND["statut_abonnement"] not in ("actif", "en_grace"):
     }
     st.error(messages_statut.get(MARCHAND["statut_abonnement"], "Cette boutique n'est pas disponible actuellement."))
     st.stop()
+
+
+# 🔒 ISOLATION MULTI-TENANT (fix pro) : une session (un onglet navigateur)
+# doit rester strictement attachée à UNE SEULE boutique. Sans ce garde-fou,
+# un visiteur qui changerait de lien ?boutique=... dans le MÊME onglet (ex :
+# un marchand teste sa boutique puis suit le lien d'un confrère, ou colle
+# une autre URL) hériterait silencieusement de l'état de la boutique
+# précédente -- panier, favoris, et surtout une éventuelle SESSION ADMIN déjà
+# ouverte, ce qui donnerait accès au panneau admin de la nouvelle boutique
+# sans jamais avoir saisi son mot de passe. On détecte donc tout changement
+# de MARCHAND_ID dans la session et on réinitialise entièrement l'état
+# propre à une boutique avant de continuer le rendu de la page.
+CLES_SESSION_PAR_BOUTIQUE = [
+    "acces_choisi", "accroche_visuel_generee", "admin_connecte",
+    "admin_derniere_activite", "admin_tentatives", "admin_verrou_jusqu_a",
+    "alerte_upload_catalogue", "banniere_code_genere", "banniere_texte_genere",
+    "banniere_titre_genere", "cart", "dernier_panier_signature", "favoris",
+    "ia_calendrier_genere", "ia_description_generee", "ia_offre_genere",
+    "ia_pack_genere", "ia_post_genere", "ia_tunnel_genere", "icone_toast",
+    "jouer_son", "message_toast", "otp_suivi", "refresh_token",
+]
+
+if st.session_state.get("_boutique_verrouillee_id") not in (None, MARCHAND_ID):
+    for _cle in CLES_SESSION_PAR_BOUTIQUE:
+        st.session_state.pop(_cle, None)
+    # Le panier/favoris de l'ancienne boutique ne doivent pas non plus
+    # survivre dans l'URL, sinon ils seraient réimportés au prochain rerun.
+    for _cle_url in ("panier", "favoris"):
+        if _cle_url in st.query_params:
+            del st.query_params[_cle_url]
+
+st.session_state["_boutique_verrouillee_id"] = MARCHAND_ID
 
 
 if "admin_connecte" not in st.session_state:
