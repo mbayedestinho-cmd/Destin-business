@@ -3,11 +3,11 @@
 # (une mise à jour amont imprévue ou compromise ne peut plus être tirée
 # silencieusement au prochain déploiement). Pense à revoir ces versions
 # périodiquement (ex: via Dependabot ou `pip list --outdated`).
-streamlit~=1.59.2
-supabase~=2.31.0
-pandas~=2.2.3
-plotly~=5.24.1
-requests~=2.32.3
-bcrypt~=4.2.1
-Pillow~=11.0.0
-streamlit-autorefresh~=1.0.1
+streamlit
+supabase>2.10.0
+pandas
+plotly
+requests
+bcrypt
+Pillow
+streamlit-autorefresh
