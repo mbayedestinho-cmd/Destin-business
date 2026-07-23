@@ -19,6 +19,7 @@ import requests
 import bcrypt
 from email.mime.text import MIMEText
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from supabase import create_client, Client
 
 # 🔒 Logs serveur pour les erreurs techniques -- jamais affichées en clair à
@@ -368,6 +369,11 @@ if SECRETS_MANQUANTS:
     st.stop()
 
 EMAIL_ACTIVE = "GMAIL_ADDRESS" in st.secrets and "GMAIL_APP_PASSWORD" in st.secrets
+
+# Fuseau horaire de la boutique -- utilisé pour convertir les dates/heures
+# saisies par le marchand (heure locale) en UTC avant stockage. Confirmé à
+# UTC+0 (Dakar/Abidjan/Bamako) ; à changer ici si la boutique change de zone.
+FUSEAU_BOUTIQUE = ZoneInfo("Africa/Abidjan")
 
 
 def normaliser(valeur):
@@ -1422,6 +1428,18 @@ def afficher_compte_a_rebours(date_fin_iso: str, cle: str):
         return
     components.html(
         f"""
+        <style>
+            /* components.html rend dans un iframe isolé : le CSS de la page
+            principale (.aura-flash-badge) ne traverse pas jusqu'ici, donc on
+            redéfinit le style localement pour que le badge s'affiche bien. */
+            body {{ margin: 0; padding: 0; }}
+            .aura-flash-badge {{
+                display: inline-flex; align-items: center; gap: 5px;
+                background: #2a1810; border: 1px solid #e0703f; color: #ffb27a;
+                font-weight: 700; font-size: 0.8rem; padding: 3px 10px; border-radius: 14px;
+                font-family: sans-serif; white-space: nowrap;
+            }}
+        </style>
         <div id="cptdown_{cle}" class="aura-flash-badge">⚡ ...</div>
         <script>
         (function() {{
@@ -1444,7 +1462,7 @@ def afficher_compte_a_rebours(date_fin_iso: str, cle: str):
         }})();
         </script>
         """,
-        height=34,
+        height=40,
     )
 
 
@@ -3627,7 +3645,9 @@ else:
                                 if desactiver_flash:
                                     maj_flash = {"prix_promo": None, "promo_expire_le": None}
                                 else:
-                                    fin_datetime = datetime.combine(date_fin_flash, heure_fin_flash).replace(tzinfo=timezone.utc)
+                                    fin_datetime = datetime.combine(
+                                        date_fin_flash, heure_fin_flash, tzinfo=FUSEAU_BOUTIQUE
+                                    ).astimezone(timezone.utc)
                                     maj_flash = {
                                         "prix_promo": prix_flash,
                                         "promo_expire_le": fin_datetime.isoformat(),
